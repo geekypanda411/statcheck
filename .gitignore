@@ -28,3 +28,8 @@ test_binaries/
 .idea/
 .DS_Store
 .pytest_cache/
+
+#Prevent commiting binaries
+bin/*
+!bin/.gitkeep
+!bin/die_db/
