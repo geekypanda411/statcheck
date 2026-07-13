@@ -1,0 +1,9 @@
+{
+    "bin_path": "./bin",
+    "tools": {
+        "diec": "diec",
+        "capa": "capa-v9.4.0-linux",
+        "exiftool": "exiftool-dir/exiftool",
+        "floss": "flare-floss/floss-linux-amd64"
+    }
+}

@@ -1,0 +1,30 @@
+# Statcheck
+
+#Python Artefacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+#Python Virtual Env
+venv/
+.venv/
+env/
+.env
+
+#Local Project Specific Files
+tools_config.json
+!tools_config.json.example
+
+#Ignore Test Samples directory
+test_binaries/
+
+#Logs
+*.log
+
+#IDE Artefacts
+.vscode/
+.idea/
+.DS_Store
+.pytest_cache/
