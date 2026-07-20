@@ -1,5 +1,5 @@
 # Statcheck
-Statchec is a highly modular orchestrator designed to automate the static analysis of binaries using Python-based plugins.
+Statcheck is a highly modular orchestrator designed to automate the static analysis of binaries using Python-based plugins.
 
 It supports chaining together custom analyzers and reporters, significantly reducing manual intervention in scenarios where heavy, automated sandbox systems are not accessible or necessary. 
 While built with malware analysis and reverse engineering in mind, the core engine is flexible enough to orchestrate almost any automated processing task.
@@ -41,8 +41,8 @@ The advantages of this approach:
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/geekypanda411/statchec.git
-cd statchec
+git clone https://github.com/geekypanda411/statcheck.git
+cd statcheck
 ```
 
 **2. Install Python dependencies**
@@ -51,7 +51,7 @@ pip install -r requirements.txt
 ```
 
 **3. Configure your external tools**
-Statchec relies on external binaries (like `diec`, `capa`, etc.). 
+Statcheck relies on external binaries (like `diec`, `capa`, etc.). 
 Copy the example configuration file and update it with the paths to the binaries on your specific machine:
 ```bash
 cp tools_config.example.json tools_config.json
@@ -71,7 +71,7 @@ Edit `tools_config.json` to point to your installed tools:
 
 ## 💻 Usage
 
-Run Statchec via the command line.
+Run Statcheck via the command line.
 
 **Standard Auto-Detect Run:**
 ```bash
@@ -92,7 +92,7 @@ python main.py malware_sample.exe --format auto --debug
 
 ## 🧩 Writing a Plugin (Analyzers)
 
-Statchec is designed to be infinitely extensible. To add a new tool to your pipeline, simply create a new Python file in the `src/analyzers/` directory that inherits from `BaseAnalyzer`.
+Statcheck is designed to be infinitely extensible. To add a new tool to your pipeline, simply create a new Python file in the `src/analyzers/` directory that inherits from `BaseAnalyzer`.
 
 Because of the dynamic plugin architecture, you do not need to register your plugin anywhere. The orchestrator will automatically find it, check its supported formats, and execute it!
 
@@ -125,7 +125,7 @@ class MyCustomAnalyzer(BaseAnalyzer):
 ---
 
 ## 🤝 Contributing
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/yourusername/statchec/issues). If you write a cool new Analyzer or Reporter plugin, please submit a Pull Request!
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/geekypanda411/statcheck/issues). If you write a cool new Analyzer or Reporter plugin, please submit a Pull Request!
 
 ## 📝 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
