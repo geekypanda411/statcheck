@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 class CapaAnalyzer(BaseAnalyzer):
     name = "capa Capability Analyzer"
     supported_formats = ['all']
-    binary_id="capa"
+    plugin_id="capa"
+    priority = 40
 
     def parse_analyzer_output(self, raw_results_dict: dict):
         output_summary = {}
@@ -88,7 +89,7 @@ class CapaAnalyzer(BaseAnalyzer):
 
         return output_summary
 
-    def analyze(self, target_file, tool_path):
+    def analyze(self, target_file, tool_path, plugin_config):
         logger.debug(f"Running capa on {target_file.filename}")
 
         import os
@@ -125,4 +126,4 @@ class CapaAnalyzer(BaseAnalyzer):
         
         logger.debug("Parsing capa output")
         parsed_results = self.parse_analyzer_output(raw_results)
-        target_file.add_result(self.binary_id,summary_data=parsed_results,complete_data=raw_results)
+        target_file.add_result(self.plugin_id,summary_data=parsed_results,complete_data=raw_results)

@@ -1,9 +1,15 @@
 {
     "bin_path": "./bin",
-    "tools": {
-        "diec": "diec",
-        "capa": "capa-v9.4.0-linux",
-        "exiftool": "exiftool-dir/exiftool",
-        "floss": "flare-floss/floss-linux-amd64"
+    "plugins": {
+        "diec": {
+            "name": "Detect It Easy Analyzer",
+            "enabled": true,
+            "tool": "diec"
+        },
+        "capa": {
+            "name": "capa Capability Analyzer",
+            "enabled": true,
+            "tool": "capa-v9.4.0-linux"
+        }
     }
 }

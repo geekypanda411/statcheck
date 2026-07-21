@@ -28,15 +28,6 @@ class Orchestrator:
             logger.warning(f"Config file {config_path} not found. Using defaults.")
             return {"bin_path": "./bin", "tools": {}}
 
-    def _get_tool_path(self, binary_id: str) -> str:
-        #Get tool path based on tool_config.json and binary_id
-        if not binary_id:
-            return None
-            
-        # default bin if path not configured, usefull in case of installed tools
-        configured_path = self.config.get("tools", {}).get(binary_id, binary_id)
-        return os.path.join(self.bin_dir, configured_path)
-
     def _import_plugin_files(self, file_paths: list):
         if not hasattr(self, '_loaded_modules'):
             self._loaded_modules = []
@@ -89,10 +80,13 @@ class Orchestrator:
             formats = analyzer.supported_formats
             if 'all' in formats or self.file_format in formats:
                 self.analyzers.append(analyzer)
-                logger.debug(f"Analyzer loaded: {analyzer.name}")
+                logger.debug(f"Analyzer loaded: {analyzer.name} with Priority: {analyzer.priority}")
             else:
                 logger.debug(f"Analyzer {analyzer.name} skipped (unsupported format: {self.file_format})")
+        self.analyzers.sort(key=lambda x: x.priority)
         logger.info(f"Total analyzers loaded: {len(self.analyzers)}")
+        execution_order = " -> ".join([f"{a.name} (Priority {a.priority})" for a in self.analyzers])
+        logger.debug(f"Analyzer Execution Order: {execution_order}")
 
     def load_reporters(self, reporter_dir: str, desired_reporter: list):
         file_ignore_list = ["__init__.py", "base_reporter.py"]
@@ -123,11 +117,18 @@ class Orchestrator:
         # 1. Run Analyzers
         logger.info("Starting analysis...")
         for analyzer in self.analyzers:
+            plugin_config = self.config.get("plugins",{}).get(analyzer.plugin_id, {})
+
+            if plugin_config.get("enabled", False) is False:
+                logger.debug(f"Skipping analyzer: {analyzer.name} disabled in config or absent from config")
+                continue
+
             logger.debug(f"Executing Analyzer: '{analyzer.name}'")
             try:
-                tool_path = self._get_tool_path(analyzer.binary_id)
+                configured_tool_name = plugin_config.get("tool", analyzer.plugin_id)
+                tool_path = os.path.join(self.bin_dir, configured_tool_name)
                 logger.debug(f"Identified tool path: '{tool_path}'")
-                analyzer.analyze(self.target_file, tool_path)
+                analyzer.analyze(self.target_file, tool_path, plugin_config)
             except Exception as e:
                 logger.exception(f"Error occurred while analyzing with {analyzer.name}: {e}")
         logger.info("Analysis completed. Generating reports...")

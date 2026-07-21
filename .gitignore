@@ -33,3 +33,7 @@ test_binaries/
 bin/*
 !bin/.gitkeep
 !bin/die_db/
+
+#Prevent Commiting test reports
+reports/*
+!reports/.gitkeep

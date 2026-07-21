@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 class DIEAnalyzer(BaseAnalyzer):
     name = "Detect It Easy Analyzer"
     supported_formats = ['all']
-    binary_id = "diec"
+    plugin_id = "diec"
+    priority = 5
 
     def parse_analyzer_output(self, raw_results_dict: dict):
         output_dict = {}
@@ -36,7 +37,6 @@ class DIEAnalyzer(BaseAnalyzer):
         
         #Get Tool chain
         toolchain_list = ((raw_results_dict["diec-packer"]["detects"])[1])["values"]
-        logger.debug(f"toolchain_list: {toolchain_list}")
         file_toolchain = {}
         key_base = "tc"
         key_counter = 1
@@ -50,9 +50,9 @@ class DIEAnalyzer(BaseAnalyzer):
         output_dict["File_Toolchain"] = file_toolchain
         return output_dict
 
-    def analyze(self, target_file, tool_path):
+    def analyze(self, target_file, tool_path, plugin_config):
         logger.debug(f"Running diec on {target_file.filename}")
-        logger.debug(f"Identified tool path: {tool_path}")
+        logger.debug(f"Ignoring identified tool path: {tool_path} as this analyzer needs diec installed")
         diec_tasks = {"diec-info":"-ji","diec-entropy":"-je","diec-packer":"-ja", "diec-hash":"-jS"}
 
         raw_results = {}
@@ -84,4 +84,4 @@ class DIEAnalyzer(BaseAnalyzer):
         
         logger.debug("Parsing diec output")
         parsed_results = self.parse_analyzer_output(raw_results)
-        target_file.add_result(self.binary_id,summary_data=parsed_results,complete_data=raw_results)
+        target_file.add_result(self.plugin_id,summary_data=parsed_results,complete_data=raw_results)
