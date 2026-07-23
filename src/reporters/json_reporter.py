@@ -1,6 +1,8 @@
 import json
 import os
 import logging
+import re
+import time
 from src.reporters.base_reporter import BaseReporter
 
 logger = logging.getLogger(__name__)
@@ -11,9 +13,11 @@ class JsonReporter(BaseReporter):
 
     def generate(self, target_file, output_dir):
         logger.debug(f"Starting JSON report generation for {target_file.filename}")
-        
+
+        sanitized_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', target_file.filename)
+        timestamp_unix = int(time.time())
         # TODO::Append execution timestamp to output report, so it does not keep on rewriting the old one
-        output_filename = f"{target_file.filename}.json"
+        output_filename = f"{sanitized_name}_statcheck_results_{timestamp_unix}.json"
         output_path = os.path.join(output_dir, output_filename)
         
         try:

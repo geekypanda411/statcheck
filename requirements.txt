@@ -1,0 +1,15 @@
+aiofiles==25.1.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.2
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+idna==3.18
+multidict==6.7.1
+pefile==2024.8.26
+ppdeep==20260221
+propcache==0.5.2
+py-tlsh==5.0.0
+python-dotenv==1.2.2
+vt-py==0.22.0
+yarl==1.24.5

@@ -5,6 +5,9 @@ from src.core.orchestrator import Orchestrator
 import logging
 import subprocess
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def setup_logging(is_debug: bool, log_file: str):
     log_level = logging.DEBUG if is_debug else logging.INFO
