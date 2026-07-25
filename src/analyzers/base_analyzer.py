@@ -17,13 +17,11 @@ class BaseAnalyzer(ABC):
         return None
 
     @property
-    def priority(self) -> int:
-        #Mechanism to prioritise execution of specific plugins
-        #Intent is to avoid situations where a plugin B requiring results of plugin A
-        #Does not end up running before plugin A
-        #It is int so you can have it set at whatever but the sorting will be in
-        #ascending order.
-        return 50
+    def depends(self) -> list:
+        #List of plugins a plugin depends e.g.
+        #If plugin B depends on output of plugin A then plugin B's depends list will have plugin A
+        #The core engine will make sure the depends plugin gets executed first.
+        return []
 
     @abstractmethod
     def analyze(self, target_file, tool_path: str, plugin_config: dict):

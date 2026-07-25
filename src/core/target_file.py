@@ -4,7 +4,7 @@ class TargetFile:
     def __init__(self, file_path: str):
         self.path = Path(file_path)
         self.filename = self.path.name
-        self.results = {"result_summary":{},"result_complete":{}}
+        self.results = {"metadata": {},"result_summary":{},"result_complete":{}}
 
     def add_result(self, tool_name: str, summary_data=None, complete_data=None):
         # use .setdefault() so that if the key gets deleted somehow Python will recreate it on the fly!

@@ -14,6 +14,12 @@ class BaseReporter(ABC):
         #Report format
         pass
 
+    @property
+    @abstractmethod
+    def reporter_id(self) -> str:
+        #The key used in reporter_config.json (e.g., 'json_reporter')
+        pass
+    
     @abstractmethod
     def generate(self, target_file: TargetFile, output_dir: str):
         #Actual report writer

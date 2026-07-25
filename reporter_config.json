@@ -1,0 +1,16 @@
+{
+    "reporters": {
+        "json_reporter": {
+            "name": "JSON Output Generator",
+            "enabled": true,
+            "output_template": [
+                "fileinfo",
+                "pe_sections",
+                "diec",
+                "malwarebazaar",
+                "vtlookup",
+                "capa"
+            ]
+        }
+    }
+}

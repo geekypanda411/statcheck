@@ -10,7 +10,7 @@ class DIEAnalyzer(BaseAnalyzer):
     name = "Detect It Easy Analyzer"
     supported_formats = ['all']
     plugin_id = "diec"
-    priority = 5
+    depends = []
 
     def parse_analyzer_output(self, raw_results_dict: dict):
         output_dict = {}
@@ -38,10 +38,10 @@ class DIEAnalyzer(BaseAnalyzer):
         #Get Tool chain
         toolchain_list = ((raw_results_dict["diec-packer"]["detects"])[1])["values"]
         file_toolchain = {}
-        key_base = "tc"
+        key_base = "toolchain"
         key_counter = 1
         for tool in toolchain_list:
-            full_key = key_base + str(key_counter)
+            full_key = key_base + "_" + str(key_counter)
             subkey_type = tool["type"]
             subkey_string = tool["string"]
             file_toolchain[full_key] = {"type":subkey_type,"string":subkey_string}

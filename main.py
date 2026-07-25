@@ -3,8 +3,6 @@ import os
 import sys
 from src.core.orchestrator import Orchestrator
 import logging
-import subprocess
-import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +14,7 @@ def setup_logging(is_debug: bool, log_file: str):
         handlers.append(logging.FileHandler(log_file))
     else:
         handlers.append(logging.StreamHandler(sys.stdout))
-    logging.basicConfig(level=log_level, format="%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s", handlers=handlers)
+    logging.basicConfig(level=log_level, format="%(asctime)s | %(threadName)-15s | %(name)-20s | %(levelname)-8s | %(message)s", handlers=handlers)
 
 def auto_detect_format(file_path: str) -> str:
     
