@@ -30,7 +30,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                 
                 # --- 1. EXACT HASH LOOKUP ---
                 if plugin_config.get("lookup_exact_hash", True):
-                    sha256 = summary.get("diec", {}).get("File_SHA256")
+                    sha256 = summary.get("fileinfo", {}).get("File_SHA256")
                     if sha256:
                         logger.info(f"Querying VT for exact hash: {sha256}")
                         try:
@@ -108,7 +108,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                 # --- 2. FUZZY HASH LOOKUP (SSDeep) ---
                 if plugin_config.get("lookup_fuzzy_hash", False):
                     logger.debug(f"Fuzzy Hashing is enabled in config. It requires Premium API and may burn a lot of credits.")
-                    ssdeep = summary.get("fuzzyhasher", {}).get("ssdeep")
+                    ssdeep = summary.get("fileinfo", {}).get("File_ssdeep")
                     if ssdeep:
                         logger.info("Querying VT for SSDeep similarity...")
                         fuzzy_matches = []

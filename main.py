@@ -19,31 +19,30 @@ def setup_logging(is_debug: bool, log_file: str):
     logging.basicConfig(level=log_level, format="%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s", handlers=handlers)
 
 def auto_detect_format(file_path: str) -> str:
-    logger = logging.getLogger(__name__)
+    
     try:
-        logger.debug("Running diec for file format detection")
-        result = subprocess.run(["diec","-ji",file_path],capture_output=True, text=True)
-        if not result.stdout.strip():
-            logger.warning("DiEC returned empty result, could not identify format")
-            return "Unknown"
-        
-        diec_info_data = json.loads(result.stdout)
-        logger.debug(f"DiEC Info Data:\n {diec_info_data}")
-        file_type = diec_info_data["data"]["Info"]["File type"] or ""
-        file_type = file_type.lower()
-        logger.debug(f"Identified file format: {file_type}")
+        with open(file_path, "rb") as f:
 
-        if "pe" in file_type:
-            return "pe"
-        elif "elf" in file_type:
-            return "elf"
-        elif "macho" in file_type:
-            return "macho"
-        else:
-            logger.warning(f"Identified file format {file_type} is not supported as of now.")
-            return "unknown"
+            magic = f.read(4)
+
+            if magic.startswith(b"MZ"):
+                return "pe"
+
+            elif magic.startswith(b"\x7fELF"):
+                return "elf"
+                
+            # Mach-O files (macOS) have a few specific byte signatures (32/64 bit and Fat)
+            elif magic in [b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", 
+                           b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", 
+                           b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"]:
+                return "macho"
+                
+            else:
+                return "unknown"
+                
     except Exception as e:
-        logger.warning(f"Auto-detect failed: {e}")
+        import logging
+        logging.getLogger(__name__).warning(f"Python auto-detect failed: {e}")
         return "unknown"
 
 def main():
