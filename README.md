@@ -102,14 +102,24 @@ class CustomAnalyzer(BaseAnalyzer):
 
 ## Future Roadmap
 
-- [x] **Environment Variables Support:** Integrate `.env` parsing to securely manage API keys.
+**Core Engine & Architecture**
+- [x] **Environment Variables:** Integrate `.env` parsing to securely manage API keys.
 - [x] **Parallel Execution:** Upgrade the Orchestrator engine to run independent analyzers concurrently.
-- [x] **Threat Intelligence (TI) Plugins:** Support for automated querying against VirusTotal and MalwareBazaar.
-- [ ] **String Deobfuscation:** Add a FLOSS analyzer to extract and filter IOCs via regex.
 - [ ] **Execution Templates:** Use JSON to define strict tool chaining and repeatable analysis templates.
-- [ ] **Human-Readable Reporters:** Implement Markdown and HTML reporters for shareable forensic reports.
-- [ ] **LLM Integration:** Create a dedicated reporter that feeds the `result_summary` into an LLM for automated insights.
 - [ ] **Archive Pre-processing:** Support unpacking password-protected malware archives (e.g., zip/7z) prior to analysis.
+
+**Analysis & Threat Intelligence**
+- [x] **Public TI APIs:** Automated querying against VirusTotal and MalwareBazaar.
+- [ ] **String Extraction:** Add a FLOSS analyzer to extract and filter IOCs via regex.
+- [ ] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
+- [ ] **OSINT Hash Search:** Automate Google querying to find existing sandbox reports or threat write-ups for a sample.
+- [ ] **Internal CTI Integration:** Add the ability to query internal intelligence platforms like MISP and OpenCTI.
+- [ ] **Dynamic Analysis (CAPEv2):** Automate submitting samples to a CAPEv2 instance and parsing the behavioral results.
+
+**Reporting & Output**
+- [ ] **Human-Readable Reporters:** Implement Markdown and HTML reporters for shareable forensic reports.
+- [ ] **LLM Integration:** Feed the high-signal `result_summary` into an LLM for automated narrative threat assessments.
+- [ ] **STIX 2.1 Reporter:** Convert results to STIX 2.1 compliant output for automated ingestion by enterprise TI platforms.
 
 ## Contributing
 
