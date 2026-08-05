@@ -10,7 +10,7 @@ class DIEAnalyzer(BaseAnalyzer):
     name = "Detect It Easy Analyzer"
     supported_formats = ['all']
     plugin_id = "diec"
-    depends = []
+    depends = {"all": [], "any": []}
 
     def parse_analyzer_output(self, raw_results_dict: dict):
         output_dict = {}

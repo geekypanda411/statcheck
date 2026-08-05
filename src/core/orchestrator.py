@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Orchestrator:
     def __init__(self, file_path: str, file_format: str, config_path: str = "tools_config.json",reporter_config_path: str = "reporter_config.json"):
-        self.target_file = TargetFile(file_path)
+        self.target_file = TargetFile(file_path, file_format)
         self.file_format = file_format.lower()
         self.analyzers = []
         self.reporters = []
@@ -130,14 +130,25 @@ class Orchestrator:
             removed_any = False
             for analyzer in self.analyzers:
                 if analyzer.plugin_id in active_plugin_ids:
-                    # Find dependencies that are NOT in our active list
-                    missing_deps = [dep for dep in analyzer.depends if dep not in active_plugin_ids]
                     
-                    if missing_deps:
-                        logger.warning(
-                            f"Cascading Skip: '{analyzer.name}' will not run. "
-                            f"Missing/Disabled dependencies: {missing_deps}"
-                        )
+                    deps = analyzer.depends
+                    all_deps = deps.get("all", [])
+                    any_deps = deps.get("any", [])
+                    
+                    # Check 'all' logic: strict dependencies
+                    missing_all = [dep for dep in all_deps if dep not in active_plugin_ids]
+                    
+                    # B. Check 'any' logic: If 'any' is defined, at least one should be active
+                    missing_any = False
+                    if any_deps:
+                        has_active_any = any(dep in active_plugin_ids for dep in any_deps)
+                        if not has_active_any:
+                            missing_any = True
+                            
+                    if missing_all or missing_any:
+                        reason = f"Missing 'all' deps: {missing_all}." if missing_all else f"None of 'any' deps enabled: {any_deps}."
+                        logger.warning(f"Cascading Skip: '{analyzer.name}' will not run. {reason}")
+                        
                         active_plugin_ids.remove(analyzer.plugin_id)
                         removed_any = True
             
@@ -168,7 +179,20 @@ class Orchestrator:
                 ready_to_run = []
                 for analyzer in pending_analyzers:
                     # Check if ALL dependencies are in the completed set
-                    if all(dep in completed_plugins for dep in analyzer.depends):
+                    deps = analyzer.depends
+                    all_deps = deps.get("all", [])
+                    any_deps = deps.get("any", [])
+                    
+                    # Hard dependencies ('all') must have finished
+                    all_deps_met = all(dep in completed_plugins for dep in all_deps)
+                    
+                    # Aggregate dependencies ('any')
+                    # dynamically filter the list to ONLY look at the ones that survived the pruning phase
+                    active_any_deps = [dep for dep in any_deps if dep in active_plugin_ids]
+                    any_deps_met = all(dep in completed_plugins for dep in active_any_deps)
+                    
+                    # Only append if BOTH dependency sets are perfectly satisfied
+                    if all_deps_met and any_deps_met:
                         ready_to_run.append(analyzer)
 
                 # 2. Schedule the ready plugins

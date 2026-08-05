@@ -17,11 +17,13 @@ class BaseAnalyzer(ABC):
         return None
 
     @property
-    def depends(self) -> list:
-        #List of plugins a plugin depends e.g.
-        #If plugin B depends on output of plugin A then plugin B's depends list will have plugin A
-        #The core engine will make sure the depends plugin gets executed first.
-        return []
+    def depends(self) -> dict:
+        """
+        Dictionary of plugin_ids this analyzer depends on.
+        'all': Strict dependencies. All must be enabled and complete.
+        'any': Aggregate dependencies. At least ONE must be enabled. Will wait for all enabled ones to complete.
+        """
+        return {"all": [], "any": []}
 
     @abstractmethod
     def analyze(self, target_file, tool_path: str, plugin_config: dict):

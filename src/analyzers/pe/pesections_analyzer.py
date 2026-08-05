@@ -8,7 +8,7 @@ class PESectionAnalyzer(BaseAnalyzer):
     name = "PE Section Analyzer"
     supported_formats = ['pe']
     plugin_id = "pe_sections"
-    depends = []
+    depends = {"all": [], "any": []}
 
     def analyze(self, target_file, tool_path, plugin_config):
         logger.debug(f"Analyzing PE sections for {target_file.filename}")

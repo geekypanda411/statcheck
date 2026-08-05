@@ -13,7 +13,7 @@ class BasicInfoAnalyzer(BaseAnalyzer):
     name = "Basic File Information"
     supported_formats = ['all']
     plugin_id = "fileinfo"
-    depends = []
+    depends = {"all": [], "any": []}
 
     def calculate_entropy(self, data):
         #Calculates Shannon Entropy of a byte sequence (0.0 to 8.0)

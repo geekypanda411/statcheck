@@ -7,8 +7,10 @@
                 "fileinfo",
                 "pe_sections",
                 "diec",
+                "iocextractor",
                 "malwarebazaar",
                 "vtlookup",
+                "floss",
                 "capa"
             ]
         }

@@ -1,9 +1,10 @@
 from pathlib import Path
 
 class TargetFile:
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, file_format: str = "unknown"):
         self.path = Path(file_path)
         self.filename = self.path.name
+        self.format = file_format.lower()
         self.results = {"metadata": {},"result_summary":{},"result_complete":{}}
 
     def add_result(self, tool_name: str, summary_data=None, complete_data=None):

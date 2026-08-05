@@ -10,7 +10,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
     name = "VirusTotal TI Lookup"
     supported_formats = ['all']
     plugin_id = "vtlookup"
-    depends = ["fileinfo"]
+    depends = {"all": ["fileinfo"], "any": []}
 
     def analyze(self, target_file, tool_path, plugin_config):
         env_var_name = plugin_config.get("api_key_env", "VT_API_KEY")
