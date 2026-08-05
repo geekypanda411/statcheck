@@ -83,7 +83,7 @@ class CustomAnalyzer(BaseAnalyzer):
     supported_formats = ['all']
     
     # Define plugins that must run before this one
-    depends = ["basicinfo"] 
+    depends = {"all":["<List of plugins that must be executed before your plugin>"],"any":[<List of plugins where at least one of these should be enabled and executed before your plugin>]} 
 
     def analyze(self, target_file, tool_path, plugin_config):
         # 1. Run your external tool
@@ -110,7 +110,7 @@ class CustomAnalyzer(BaseAnalyzer):
 
 **Analysis & Threat Intelligence**
 - [x] **Public TI APIs:** Automated querying against VirusTotal and MalwareBazaar.
-- [ ] **String Extraction:** Add a FLOSS analyzer to extract and filter IOCs via regex.
+- [x] **String Extraction:** Add a FLOSS analyzer to extract and filter IOCs via regex.
 - [ ] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
 - [ ] **OSINT Hash Search:** Automate Google querying to find existing sandbox reports or threat write-ups for a sample.
 - [ ] **Internal CTI Integration:** Add the ability to query internal intelligence platforms like MISP and OpenCTI.
