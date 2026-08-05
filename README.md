@@ -83,7 +83,7 @@ class CustomAnalyzer(BaseAnalyzer):
     supported_formats = ['all']
     
     # Define plugins that must run before this one
-    depends = {"all":["<List of plugins that must be executed before your plugin>"],"any":[<List of plugins where at least one of these should be enabled and executed before your plugin>]} 
+    depends = {"all":["<List of plugins that must be executed before your plugin>"],"any":["<List of plugins where at least one of these should be enabled and executed before your plugin>"]} 
 
     def analyze(self, target_file, tool_path, plugin_config):
         # 1. Run your external tool
