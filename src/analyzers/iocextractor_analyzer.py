@@ -4,6 +4,7 @@ import os
 import time
 import requests
 import json
+from collections import defaultdict
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -63,24 +64,33 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
     def analyze(self, target_file, tool_path, plugin_config):
         logger.debug("Starting Central IOC Extraction...")
         
-        # HARVEST PUBLISHED STRINGS
-        master_string_pool = set()
         # QS tags to skip
-        ignore_tags = {"#winapi", "#common", "#code", "#reloc"}
+        ignore_tags = set(plugin_config.get("ignore_tags", ["#winapi", "#code", "#code-junk", "#reloc"]))
+
+        # HARVEST & MERGE PUBLISHED STRINGS
+        # defaultdict(set) automatically creates a new set if the string hasn't been seen before
+        master_tags_dict = defaultdict(set)
 
         # Loop through all complete results to find published inputs
         complete_results = target_file.results.get("result_complete", {})
         for source_plugin_id, data in complete_results.items():
             inputs = data.get("ioc_extractor_input", [])
             for item in inputs:
-                # Discard strings that have junk/benign tags
-                if not any(tag in ignore_tags for tag in item.get("tags", [])):
-                    master_string_pool.add(item["string"])
+                s_val = item.get("string")
+                if s_val:
+                    # .update() merges tags from FLOSS ([]) and QS (["#code"]) flawlessly
+                    master_tags_dict[s_val].update(item.get("tags", []))
+
+        master_string_pool = []
+        for s_val, merged_tags in master_tags_dict.items():
+            if not any(tag in ignore_tags for tag in merged_tags):
+                master_string_pool.append(s_val)
 
         if not master_string_pool:
             logger.info("No published strings found for extraction.")
             return
 
+        logger.info(f"Strings passed to Regex: {len(master_string_pool)}")
         massive_text_block = "\n".join(master_string_pool)
         tld_list = self._update_tld_list(plugin_config)
 

@@ -1,6 +1,28 @@
 {
     "bin_path": "./bin",
     "plugins": {
+        "vtlookup": {
+            "name": "VirusTotal TI Lookup",
+            "enabled": false,
+            "api_key_env": "VT_API_KEY",
+            "lookup_exact_hash": true,
+            "fetch_relations_behaviour": true,
+            "relations_result_limit": 40,
+            "lookup_fuzzy_hash": false,
+            "fuzzy_lookup_limit": 5
+        },
+        "malwarebazaar": {
+            "name": "MalwareBazaar TI Lookup",
+            "enabled": false,
+            "api_key_env": "MB_API_KEY",
+            "lookup_exact_hash": true,
+            "lookup_fuzzy_hash": true,
+            "relation_limit": 10
+        },
+        "fuzzyhasher": {
+            "name": "Fuzzy Hash Analyzer",
+            "enabled": true
+        },
         "diec": {
             "name": "Detect It Easy Analyzer",
             "enabled": true,
@@ -10,6 +32,36 @@
             "name": "capa Capability Analyzer",
             "enabled": true,
             "tool": "capa-v9.4.0-linux"
+        },
+        "fileinfo": {
+            "name": "Basic File Information",
+            "enabled": true
+        },
+        "pe_sections": {
+            "name": "PE Section Analyzer",
+            "enabled": true
+        },
+        "floss": {
+            "name": "FLOSS String Analyzer",
+            "enabled": true,
+            "tool": "floss-3.1.1-linux",
+            "min_string_length": 5
+        },
+        "quantumstrand": {
+            "name": "QUANTUMSTRAND (Beta)",
+            "enabled": true,
+            "tool": "quantumstrand-beta3-linux",
+            "min_string_length": 4,
+            "summary_tags": ["#winapi", "#expert", "#decoded"]
+        },
+        "iocextractor": {
+            "name": "IOC Extractor",
+            "enabled": true,
+            "tld_file": "./bin/tlds.txt",
+            "tldupdatefreqdays": 7,
+            "tldupdatedon": 1785896693,
+            "tld_version": 2026080400,
+            "ignore_tags": ["#winapi", "#code", "#code-junk", "#reloc"]
         }
     }
 }

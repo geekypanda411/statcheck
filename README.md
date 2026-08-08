@@ -106,12 +106,12 @@ class CustomAnalyzer(BaseAnalyzer):
 - [x] **Environment Variables:** Integrate `.env` parsing to securely manage API keys.
 - [x] **Parallel Execution:** Upgrade the Orchestrator engine to run independent analyzers concurrently.
 - [ ] **Execution Templates:** Use JSON to define strict tool chaining and repeatable analysis templates.
-- [ ] **Archive Pre-processing:** Support unpacking password-protected malware archives (e.g., zip/7z) prior to analysis.
 
 **Analysis & Threat Intelligence**
 - [x] **Public TI APIs:** Automated querying against VirusTotal and MalwareBazaar.
-- [x] **String Extraction:** Add a FLOSS analyzer to extract and filter IOCs via regex.
+- [x] **String Extraction:** Add a FLOSS and QUANTUMSTRAND analyzer to extract and filter IOCs via regex.
 - [ ] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
+- [ ] **Prompt Injection strings Detection:** Add support to analyze extracted strings and identify potential prompt injection strings.
 - [ ] **OSINT Hash Search:** Automate Google querying to find existing sandbox reports or threat write-ups for a sample.
 - [ ] **Internal CTI Integration:** Add the ability to query internal intelligence platforms like MISP and OpenCTI.
 - [ ] **Dynamic Analysis (CAPEv2):** Automate submitting samples to a CAPEv2 instance and parsing the behavioral results.
