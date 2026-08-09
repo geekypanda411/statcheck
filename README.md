@@ -85,18 +85,29 @@ class CustomAnalyzer(BaseAnalyzer):
     # Define plugins that must run before this one
     depends = {"all":["<List of plugins that must be executed before your plugin>"],"any":["<List of plugins where at least one of these should be enabled and executed before your plugin>"]} 
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         # 1. Run your external tool
         result = subprocess.run([tool_path, str(target_file.path)], capture_output=True, text=True)
         
         # 2. Parse the output into a clean summary
         summary = {"status": "analyzed"}
         
+        # Base Analyzer has a helper (get_plugin_dir) that generates a directory for the plugin calling it
+        plugin_dir = self.get_plugin_dir(run_dir)
+        # Name of your complete raw results, ideally <plugin id>_raw_output.<format>
+        raw_output_path = os.path.join(plugin_dir, "custom_tool_raw_output.json")
+        with open(raw_output_path, "w") as f:
+            json.dump(complete, f, indent=4)
+        # Linking raw tool output to the summary
+        summary["raw_output_path"] = raw_output_path
+
         # 3. Save it back to the target file
         target_file.add_result(
             self.plugin_id, 
             summary_data=summary, 
-            complete_data={"raw_output": result.stdout}
+            internal_context_data={
+                "whatever_you_want_passed_to_other_plugins": generated_internal_context,
+            }
         )
 ```
 
