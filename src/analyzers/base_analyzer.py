@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import os
 
 class BaseAnalyzer(ABC):
     @property
@@ -25,6 +26,12 @@ class BaseAnalyzer(ABC):
         """
         return {"all": [], "any": []}
 
+    def get_plugin_dir(self, run_dir: str) -> str:
+        #Helper to dynamically create and return this plugin's dedicated output folder
+        plugin_dir = os.path.join(run_dir, self.plugin_id)
+        os.makedirs(plugin_dir, exist_ok=True)
+        return plugin_dir
+
     @abstractmethod
-    def analyze(self, target_file, tool_path: str, plugin_config: dict):
+    def analyze(self, target_file, tool_path: str, plugin_config: dict, run_dir: str):
         pass

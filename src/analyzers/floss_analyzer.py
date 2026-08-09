@@ -2,16 +2,17 @@ import logging
 import subprocess
 import json
 from src.analyzers.base_analyzer import BaseAnalyzer
+import os
 
 logger = logging.getLogger(__name__)
 
 class FlossAnalyzer(BaseAnalyzer):
     name = "FLOSS String Extractor"
-    supported_formats = ['all']
+    supported_formats = ['pe']
     plugin_id = "floss"
     depends = {"all": [], "any": []}
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Starting FLOSS analysis on {target_file.filename}")
         
         min_length_string = plugin_config.get("min_string_length", 5)
@@ -27,12 +28,18 @@ class FlossAnalyzer(BaseAnalyzer):
             logger.error(f"FLOSS execution failed: {e}")
             return
 
+        plugin_dir = self.get_plugin_dir(run_dir)
+
         # PARSE JSON & FLATTEN STRINGS
         try:
             floss_json = json.loads(result.stdout)
         except json.JSONDecodeError:
             logger.error("Failed to decode FLOSS JSON.")
             return
+
+        raw_output_path = os.path.join(plugin_dir, "floss_raw_output.json")
+        with open(raw_output_path, "w") as f:
+            json.dump(floss_json, f, indent=4)
 
         summary = {}
 
@@ -59,6 +66,8 @@ class FlossAnalyzer(BaseAnalyzer):
             "version": metadata_block.get("version", "Unknown")
         }
 
+        summary["raw_output_path"] = raw_output_path
+
         # EXTRACT & DEDUPLICATE STRINGS using set
         extracted_strings = set()
         strings_block = floss_json.get("strings", {})
@@ -77,15 +86,15 @@ class FlossAnalyzer(BaseAnalyzer):
 
         if not ioc_input_list:
             logger.warning("FLOSS did not find any strings in the file.")
-            target_file.add_result(self.plugin_id, summary_data=summary, complete_data=floss_json)
+            target_file.add_result(self.plugin_id, summary_data=summary)
             return
         
         # PUBLISH TO RESULT COMPLETE
         target_file.add_result(
-            self.plugin_id, 
-            complete_data={
+            self.plugin_id,
+            summary_data=summary,
+            internal_context_data={
                 "ioc_extractor_input": ioc_input_list,
-                "raw_floss_output": floss_json
             }
         )
         logger.info(f"FLOSS published {len(ioc_input_list)} strings for extraction.")

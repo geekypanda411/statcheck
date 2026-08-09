@@ -26,7 +26,7 @@ class BasicInfoAnalyzer(BaseAnalyzer):
                 entropy += - p_x * math.log2(p_x)
         return round(entropy, 4)
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Extracting basic information for {target_file.filename}")
         
         # Read the file into RAM

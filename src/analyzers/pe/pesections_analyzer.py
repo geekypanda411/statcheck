@@ -1,5 +1,7 @@
 import logging
 import pefile
+import json
+import os
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -10,7 +12,7 @@ class PESectionAnalyzer(BaseAnalyzer):
     plugin_id = "pe_sections"
     depends = {"all": [], "any": []}
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Analyzing PE sections for {target_file.filename}")
         
         try:
@@ -95,13 +97,18 @@ class PESectionAnalyzer(BaseAnalyzer):
                 "characteristics": hex(section.Characteristics)
             })
 
+        plugin_dir = self.get_plugin_dir(run_dir)
+        raw_output_path = os.path.join(plugin_dir, "pesections_raw_output.json")
+        with open(raw_output_path, "w") as f:
+            json.dump(complete_raw, f, indent=4)
+        summary["raw_output_path"] = raw_output_path
+
         # Close the PE file to free memory
         pe.close()
 
         # Save to TargetFile
         target_file.add_result(
             self.plugin_id, 
-            summary_data=summary, 
-            complete_data={"raw_section_headers": complete_raw}
+            summary_data=summary
         )
         logger.info("Successfully analyzed PE sections.")

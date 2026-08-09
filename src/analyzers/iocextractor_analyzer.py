@@ -61,7 +61,7 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
                 return [line.strip() for line in f if line.strip()]
         return ["com", "net", "org", "io", "xyz"] # Fallback
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug("Starting Central IOC Extraction...")
         
         # QS tags to skip
@@ -72,8 +72,8 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         master_tags_dict = defaultdict(set)
 
         # Loop through all complete results to find published inputs
-        complete_results = target_file.results.get("result_complete", {})
-        for source_plugin_id, data in complete_results.items():
+        internal_context = target_file.results.get("internal_context", {})
+        for source_plugin_id, data in internal_context.items():
             inputs = data.get("ioc_extractor_input", [])
             for item in inputs:
                 s_val = item.get("string")

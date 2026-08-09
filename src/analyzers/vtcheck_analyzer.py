@@ -2,6 +2,7 @@ import logging
 import os
 import vt
 import time
+import json
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
     plugin_id = "vtlookup"
     depends = {"all": ["fileinfo"], "any": []}
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         env_var_name = plugin_config.get("api_key_env", "VT_API_KEY")
         api_key = os.environ.get(env_var_name)
 
@@ -136,6 +137,18 @@ class VirusTotalAnalyzer(BaseAnalyzer):
             logger.exception("A critical error occurred while connecting to VirusTotal.")
 
         # Save to the TargetFile's Summary component!
+        if vt_complete:
+            plugin_dir = self.get_plugin_dir(run_dir)
+            raw_output_path = os.path.join(plugin_dir, "virustotal_raw_output.json")
+            with open(raw_output_path, "w") as f:
+                json.dump(vt_complete, f, indent=4)
+            vt_summary["raw_output_path"] = raw_output_path
+            logger.info(f"Successfully added VirusTotal intelligence to {raw_output_path}")
+        else:
+            logger.warning(f"Complete raw result for VirusTotal analyzer not available.")
+        
         if vt_summary:
-            target_file.add_result(self.plugin_id, summary_data=vt_summary, complete_data=vt_complete)
-            logger.info("Successfully added VT intelligence to report.")
+            target_file.add_result(self.plugin_id, summary_data=vt_summary)
+            logger.info("Successfully added MalwareBazaar intelligence to report.")
+        else:
+            logger.warning(f"Complete raw result for Malware Bazaar analyzer not available.")

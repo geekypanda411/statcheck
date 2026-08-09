@@ -7,6 +7,7 @@ certifi==2026.7.22
 charset-normalizer==3.4.9
 frozenlist==1.8.0
 idna==3.18
+lief==1.0.0
 multidict==6.7.1
 pefile==2024.8.26
 ppdeep==20260221

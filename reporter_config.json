@@ -6,8 +6,11 @@
             "output_template": [
                 "fileinfo",
                 "pe_sections",
+                "elfstructure",
+                "authenticode",
                 "diec",
                 "iocextractor",
+                "resource_overlay",
                 "malwarebazaar",
                 "vtlookup",
                 "quantumstrand",

@@ -12,13 +12,13 @@ class JsonReporter(BaseReporter):
     format_id = "json"
     reporter_id = "json_reporter"
 
-    def generate(self, target_file, output_dir, reporter_config):
+    def generate(self, target_file, run_dir, reporter_config, timestamp):
         logger.debug(f"Starting JSON report generation for {target_file.filename}")
 
         sanitized_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', target_file.filename)
-        timestamp_unix = int(time.time())
-        output_filename = f"{sanitized_name}_statcheck_results_{timestamp_unix}.json"
-        output_path = os.path.join(output_dir, output_filename)
+        timestamp_unix = timestamp
+        output_filename = f"{sanitized_name}_statcheck_summary_{timestamp_unix}.json"
+        output_path = os.path.join(run_dir, output_filename)
 
         #Template based report section sorting
         template_order = reporter_config.get("output_template", [])
@@ -44,7 +44,6 @@ class JsonReporter(BaseReporter):
         final_ordered_results = {
             "metadata": target_file.results.get("metadata", {}),
             "result_summary": order_results(target_file.results.get("result_summary", {})),
-            "result_complete": order_results(target_file.results.get("result_complete", {}))
         }
         
         try:
@@ -57,4 +56,4 @@ class JsonReporter(BaseReporter):
             logger.error(f"Permission denied: Could not write JSON report to {output_path}")
         except Exception as e:
             # for any unexpected file I/O or serialization errors
-            logger.exception(f"An unexpected error occurred while generating JSON report for {target_file.filename}")
+            logger.exception(f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}")

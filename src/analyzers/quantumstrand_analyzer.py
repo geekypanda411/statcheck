@@ -1,6 +1,7 @@
 import logging
 import subprocess
 import json
+import os
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
     # Needs no dependencies. Runs immediately.
     depends = {"all": [], "any": []}
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Starting QUANTUMSTRAND (BETA) analysis on {target_file.filename}")
         
         min_string_length = plugin_config.get("min_string_length", 5)
@@ -109,6 +110,12 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
                     clean_tag = target_tag.replace("#", "").replace("-", "_")
                     summary[f"{clean_tag}_strings"].add(string_val)
 
+        plugin_dir = self.get_plugin_dir(run_dir)
+        raw_output_path = os.path.join(plugin_dir, "quantumstrand_raw_output.json")
+        with open(raw_output_path, "w") as f:
+            json.dump(qs_json, f, indent=4)
+        summary["raw_output_path"] = raw_output_path
+
         # Clean empty lists from the summary (e.g., if no #winapi was found)
         clean_summary = {k: (list(v) if isinstance(v, set) else v) for k, v in summary.items() if v}
 
@@ -116,9 +123,8 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         target_file.add_result(
             self.plugin_id, 
             summary_data=clean_summary,
-            complete_data={
+            internal_context_data={
                 "ioc_extractor_input": ioc_extractor_input,
-                "raw_qs_output": qs_json
             }
         )
         logger.info(f"QUANTUMSTRAND published {len(ioc_extractor_input)} deduplicated strings.")

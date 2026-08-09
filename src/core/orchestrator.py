@@ -8,6 +8,8 @@ import sys
 import os
 import json
 import concurrent.futures
+import re
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +117,13 @@ class Orchestrator:
     def execute(self, report_dir: str):
         logger.info("Pre-Processing analyzer dependencies..")
 
+        # --- Create Unified Run Directory ---
+        self.timestamp = int(time.time())
+        clean_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', self.target_file.filename)
+        self.run_dir = os.path.join(report_dir, f"{clean_name}_{self.timestamp}")
+        os.makedirs(self.run_dir, exist_ok=True)
+        logger.info(f"Created Unified Run Directory: {self.run_dir}")
+
         #Identify plugins set as active in config
         active_plugin_ids = set()
         for analyzer in self.analyzers:
@@ -206,7 +215,7 @@ class Orchestrator:
                     tool_path = str(str(self.bin_dir) + "/" + configured_tool_name)
                     
                     # Submit to the thread pool and store the Future
-                    future = executor.submit(analyzer.analyze, self.target_file, tool_path, plugin_config)
+                    future = executor.submit(analyzer.analyze, self.target_file, tool_path, plugin_config, self.run_dir)
                     running_futures[future] = analyzer
 
                 # 3. Deadlock Protection
@@ -254,7 +263,7 @@ class Orchestrator:
             logger.debug(f"Generating report using: {reporter.name}")
 
             try:
-                reporter.generate(self.target_file, report_dir, rep_config)
+                reporter.generate(self.target_file, self.run_dir, rep_config, self.timestamp)
             except Exception as e:
                 logger.exception(f"Error occurred while generating report with {reporter.name}: {e}")
         logger.info("Report generation completed.")

@@ -18,7 +18,7 @@ class CapaAnalyzer(BaseAnalyzer):
         #Get all matched rule names
         matched_rules_list = (raw_results_dict["capa-all"]).get("rules",{})
 
-        def extract_successful_features(node, matched_dict):
+        def extract_successful_features(node, matched_set):
             # Base case: if this branch failed, ignore it
             if not node.get("success"):
                 return
@@ -33,30 +33,12 @@ class CapaAnalyzer(BaseAnalyzer):
             
                 # Create a clean key e.g. "api: fopen" or "string: 'http://malicious.com'"
                 feature_name = f"{feature_type}: {feature_value}"
-
-                # Extract and convert locations to HEX for Ghidra
-                for loc in node.get("locations", []):
-                    loc_type = loc.get("type", "unknown")
-                    loc_val = loc.get("value")
                 
-                needs_decimal = loc_type in ["process", "thread", "call"]
-
-                def format_value(v):
-                    if not isinstance(v, int):
-                        return str(v)
-                    return str(v) if needs_decimal else hex(v)
-                
-                if isinstance(loc_val, list):
-                    formatted_items = [format_value(item) for item in loc_val]
-                    loc_val_str = f"[{', '.join(formatted_items)}]"
-                else:
-                    loc_val_str = format_value(loc_val)
-                
-                matched_dict[feature_name].add(f"{loc_type}_{loc_val_str}")
+                matched_set.add(feature_name)
 
             # Recursively process the 'and'/'or' branches
             for child in node.get("children", []):
-                extract_successful_features(child, matched_dict)
+                extract_successful_features(child, matched_set)
 
         # Process each matched rule
         for rule_id, rule_data in matched_rules_list.items():
@@ -70,7 +52,7 @@ class CapaAnalyzer(BaseAnalyzer):
                 attack_list.append(f"{attack_id} - {attack_tactics}")
 
             # Temp dictionary using sets to deduplicate locations
-            matched_features_temp = defaultdict(set)
+            matched_features_temp = set()
         
             for match in rule_data.get("matches", []):
                 if len(match) > 1:
@@ -78,7 +60,7 @@ class CapaAnalyzer(BaseAnalyzer):
                     extract_successful_features(root_node, matched_features_temp)
 
             # Convert sets back to lists for JSON serialization
-            clean_matched_features = {k: list(v) for k, v in matched_features_temp.items()}
+            clean_matched_features = list(matched_features_temp)
 
             output_summary[rule_id] = {
                 "name": meta.get("name", rule_id),
@@ -89,7 +71,7 @@ class CapaAnalyzer(BaseAnalyzer):
 
         return output_summary
 
-    def analyze(self, target_file, tool_path, plugin_config):
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Running capa on {target_file.filename}")
 
         import os
@@ -126,4 +108,11 @@ class CapaAnalyzer(BaseAnalyzer):
         
         logger.debug("Parsing capa output")
         parsed_results = self.parse_analyzer_output(raw_results)
-        target_file.add_result(self.plugin_id,summary_data=parsed_results,complete_data=raw_results)
+
+        plugin_dir = self.get_plugin_dir(run_dir)
+        raw_output_path = os.path.join(plugin_dir, "capa_raw_output.json")
+        with open(raw_output_path, "w") as f:
+            json.dump(raw_results, f, indent=4)
+        parsed_results["raw_output_path"] = raw_output_path
+
+        target_file.add_result(self.plugin_id,summary_data=parsed_results)
