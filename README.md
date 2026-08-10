@@ -121,7 +121,7 @@ class CustomAnalyzer(BaseAnalyzer):
 **Analysis & Threat Intelligence**
 - [x] **Public TI APIs:** Automated querying against VirusTotal and MalwareBazaar.
 - [x] **String Extraction:** Add a FLOSS and QUANTUMSTRAND analyzer to extract and filter IOCs via regex.
-- [ ] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
+- [x] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
 - [ ] **Prompt Injection strings Detection:** Add support to analyze extracted strings and identify potential prompt injection strings.
 - [ ] **OSINT Hash Search:** Automate Google querying to find existing sandbox reports or threat write-ups for a sample.
 - [ ] **Internal CTI Integration:** Add the ability to query internal intelligence platforms like MISP and OpenCTI.
