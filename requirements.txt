@@ -17,4 +17,5 @@ python-dotenv==1.2.2
 requests==2.34.2
 urllib3==2.7.0
 vt-py==0.22.0
+yara-python==4.5.4
 yarl==1.24.5

@@ -37,3 +37,7 @@ bin/*
 #Prevent Commiting test reports
 reports/*
 !reports/.gitkeep
+
+#Prevent test yara rules from getting committed
+yara_rules/*
+!yara_rules/.gitkeep

@@ -94,7 +94,7 @@ class FlossAnalyzer(BaseAnalyzer):
             self.plugin_id,
             summary_data=summary,
             internal_context_data={
-                "ioc_extractor_input": ioc_input_list,
+                "ioc_extractor_input": ioc_input_list
             }
         )
         logger.info(f"FLOSS published {len(ioc_input_list)} strings for extraction.")

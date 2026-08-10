@@ -124,7 +124,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
             self.plugin_id, 
             summary_data=clean_summary,
             internal_context_data={
-                "ioc_extractor_input": ioc_extractor_input,
+                "ioc_extractor_input": ioc_extractor_input
             }
         )
         logger.info(f"QUANTUMSTRAND published {len(ioc_extractor_input)} deduplicated strings.")

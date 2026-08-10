@@ -9,6 +9,7 @@
                 "elfstructure",
                 "authenticode",
                 "diec",
+                "yara_scanner",
                 "iocextractor",
                 "resource_overlay",
                 "malwarebazaar",
