@@ -1,7 +1,7 @@
-import subprocess
 import logging
 from pathlib import Path
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, run_tool
 import json
 from functools import reduce
 
@@ -80,7 +80,7 @@ class DIEAnalyzer(BaseAnalyzer):
             return
         logger.debug(f"Using diec executable at: {executable}")
 
-        timeout = plugin_config.get("timeout", 300)
+        timeout = self.resolve_timeout(plugin_config)
         diec_tasks = {"diec-info":"-ji","diec-entropy":"-je","diec-packer":"-ja", "diec-hash":"-jS"}
 
         raw_results = {}
@@ -91,11 +91,9 @@ class DIEAnalyzer(BaseAnalyzer):
             try:
                 # -j tells diec to output in pure JSON
                 if task_name == "diec-hash":
-                    result = subprocess.run([executable, flag, "Hash", str(target_file.path)],
-                                            capture_output=True, text=True, check=True, timeout=timeout)
+                    result = run_tool([executable, flag, "Hash", str(target_file.path)], timeout=timeout)
                 else:
-                    result = subprocess.run([executable, flag, str(target_file.path)],
-                                            capture_output=True, text=True, check=True, timeout=timeout)
+                    result = run_tool([executable, flag, str(target_file.path)], timeout=timeout)
                 
                 if not result.stdout.strip():
                     logger.debug(f"DiE flag {flag} returned empty output, skipping.")
@@ -104,11 +102,9 @@ class DIEAnalyzer(BaseAnalyzer):
                     raw_results[task_name] = diec_data
                     logger.debug(f"DiE analysis for flag {flag} complete.")
                 
-            except subprocess.TimeoutExpired:
-                logger.warning(f"DiE ({flag}) timed out after {timeout}s.")
-            except subprocess.CalledProcessError as e:
+            except ToolError as e:
                 # Use warning instead of error so that if one check fails the rest are still executed
-                logger.warning(f"DiE ({flag}) failed to execute: {(e.stderr or '').strip()}")
+                logger.warning(f"DiE ({flag}) failed to execute: {e}")
             except json.JSONDecodeError:
                 logger.warning(f"DiE ({flag}) output could not be parsed as JSON.")
             except Exception as e:

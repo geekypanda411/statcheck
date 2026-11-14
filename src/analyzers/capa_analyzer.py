@@ -1,7 +1,7 @@
-import subprocess
 import logging
 from pathlib import Path
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, run_tool
 import json
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class CapaAnalyzer(BaseAnalyzer):
             return
         logger.debug(f"Using capa executable at: {executable}")
 
-        timeout = plugin_config.get("timeout", 300)
+        timeout = self.resolve_timeout(plugin_config)
         capa_tasks = {"capa-all":"-jq"}
 
         raw_results = {}
@@ -110,9 +110,9 @@ class CapaAnalyzer(BaseAnalyzer):
 
             try:
                 # -j tells capa to output in pure JSON
-                result = subprocess.run(
+                result = run_tool(
                     [executable, flag, str(target_file.path)],
-                    capture_output=True, text=True, check=True, timeout=timeout
+                    timeout=timeout
                 )
                 
                 if not result.stdout.strip():
@@ -122,11 +122,9 @@ class CapaAnalyzer(BaseAnalyzer):
                     raw_results[task_name] = capa_data
                     logger.debug(f"capa analysis for flag {flag} complete.")
                 
-            except subprocess.TimeoutExpired:
-                logger.warning(f"capa ({flag}) timed out after {timeout}s.")
-            except subprocess.CalledProcessError as e:
+            except ToolError as e:
                 # Use warning instead of error so that if one check fails the rest are still executed
-                logger.warning(f"capa ({flag}) failed to execute: {(e.stderr or '').strip()}")
+                logger.warning(f"capa ({flag}) failed to execute: {e}")
             except json.JSONDecodeError:
                 logger.warning(f"capa ({flag}) output could not be parsed as JSON.")
             except Exception as e:

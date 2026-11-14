@@ -6,11 +6,13 @@ import os
 import re
 import sys
 import time
+import traceback
 from pathlib import Path
 
 from src.analyzers.base_analyzer import BaseAnalyzer, RuntimeContext
 from src.core.config import validate_reporter_config, validate_tool_config
 from src.core.paths import PROJECT_ROOT, resolve_path
+from src.core.process import ToolTimeout
 from src.core.target_file import TargetFile
 from src.reporters.base_reporter import BaseReporter
 
@@ -254,15 +256,35 @@ class Orchestrator:
             "reporters": sorted(reporters, key=lambda r: str(r["reporter_id"])),
         }
 
+    @staticmethod
+    def _format_exception(exc: Exception, max_length: int = 2000) -> str:
+        """repr(exc) plus a truncated traceback, for the plugin status entry."""
+        tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        text = repr(exc) + "\n" + "".join(tb)
+        if len(text) > max_length:
+            text = text[:max_length] + "\n... (truncated)"
+        return text
+
     def execute(self, report_dir: str):
         logger.info("Pre-Processing analyzer dependencies..")
 
+        run_started_at = time.time()
+
         # --- Create Unified Run Directory ---
-        self.timestamp = int(time.time())
+        self.timestamp = int(run_started_at)
         clean_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', self.target_file.filename)
         self.run_dir = os.path.join(report_dir, f"{clean_name}_{self.timestamp}")
         os.makedirs(self.run_dir, exist_ok=True)
         logger.info(f"Created Unified Run Directory: {self.run_dir}")
+
+        # --- Record run metadata ---
+        self.target_file.results["metadata"]["run"] = {
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(run_started_at)),
+            "target_path": str(self.target_file.path),
+            "target_filename": self.target_file.filename,
+            "format": self.target_file.format,
+            "python_version": sys.version.split()[0],
+        }
 
         # --- Build the runtime context handed to every analyzer ---
         self.runtime = RuntimeContext(
@@ -281,6 +303,7 @@ class Orchestrator:
                 active_plugin_ids.add(analyzer.plugin_id)
             else:
                 logger.info(f"Analyzer Disabled by Config: {analyzer.name}")
+                self.target_file.set_plugin_status(analyzer.plugin_id, "skipped_disabled")
 
         #Handle cascading scenarios where plugin c depends on plugin b which depends on plugin a
         #And plugin a being disabled essentially should prevent execution of plugin b and by extension plugin c
@@ -309,6 +332,7 @@ class Orchestrator:
                         else:
                             reason = f"None of 'any' deps enabled: {any_deps}."
                         logger.warning(f"Cascading Skip: '{analyzer.name}' will not run. {reason}")
+                        self.target_file.set_plugin_status(analyzer.plugin_id, "skipped_dependency", error=reason)
                         
                         active_plugin_ids.remove(analyzer.plugin_id)
                         removed_any = True
@@ -321,17 +345,28 @@ class Orchestrator:
 
         if not pending_analyzers:
             logger.warning("No analyzers are enabled or have satisfied dependencies. Exiting analysis phase.")
+            run_metadata = self.target_file.results["metadata"]["run"]
+            run_metadata["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            run_metadata["duration_ms"] = round((time.time() - run_started_at) * 1000, 1)
+            self.target_file.results["metadata"]["analyzed_by"] = []
             return
 
         logger.info(f"Starting parallel analysis phase with {len(pending_analyzers)} analyzers...")
 
         # Tracks {Future_Object: Analyzer_Object}
         running_futures = {}
+        # Tracks per-analyzer wall-clock start times
+        analyzer_start_times = {}
         # Tracks plugin_ids that are done
         completed_plugins = set()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="Worker") as executor:
-            
+        # NOTE: shutdown uses cancel_futures so a Ctrl-C (or an exception in
+        # the scheduler loop) does not block on queued-but-unstarted work.
+        # Subprocesses already running are bounded by the per-tool timeout.
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.workers, thread_name_prefix="Worker"
+        )
+        try:
             # Keep looping as long as there is work to do or threads currently running
             while pending_analyzers or running_futures:
                 
@@ -370,6 +405,7 @@ class Orchestrator:
                     analyzer.set_runtime(self.runtime)
 
                     # Submit to the thread pool and store the Future
+                    analyzer_start_times[analyzer.plugin_id] = time.perf_counter()
                     future = executor.submit(analyzer.analyze, self.target_file, tool_path, plugin_config, self.run_dir)
                     running_futures[future] = analyzer
 
@@ -379,6 +415,12 @@ class Orchestrator:
                 if not running_futures and pending_analyzers:
                     stuck = [a.plugin_id for a in pending_analyzers]
                     logger.error(f"Deadlock detected! Unmet dependencies for: {stuck}")
+                    for analyzer in pending_analyzers:
+                        self.target_file.set_plugin_status(
+                            analyzer.plugin_id, "skipped_dependency",
+                            error="Deadlock: unmet dependencies",
+                        )
+                    pending_analyzers = []
                     break
 
                 # 4. Wait for AT LEAST ONE plugin to finish
@@ -392,19 +434,42 @@ class Orchestrator:
                     # Process the ones that just finished
                     for future in done:
                         analyzer = running_futures.pop(future)
+                        started = analyzer_start_times.pop(analyzer.plugin_id, time.perf_counter())
+                        duration_ms = (time.perf_counter() - started) * 1000
                         try:
                             # Calling .result() raises any exceptions that happened inside the thread
                             future.result()
                             logger.info(f"Completed: {analyzer.name}")
-                        except Exception:
+                            self.target_file.set_plugin_status(
+                                analyzer.plugin_id, "completed", duration_ms=duration_ms
+                            )
+                        except ToolTimeout as e:
+                            logger.warning(f"Analyzer '{analyzer.name}' timed out: {e}")
+                            self.target_file.set_plugin_status(
+                                analyzer.plugin_id, "timeout",
+                                error=repr(e), duration_ms=duration_ms,
+                            )
+                        except Exception as e:
                             logger.exception(f"Analyzer '{analyzer.name}' crashed!")
+                            self.target_file.set_plugin_status(
+                                analyzer.plugin_id, "failed",
+                                error=self._format_exception(e), duration_ms=duration_ms,
+                            )
                         
                         # Even if it crashed, we mark it completed so the pipeline doesn't freeze.
                         # Downstream plugins will run, gracefully realize data is missing, and exit.
                         completed_plugins.add(analyzer.plugin_id)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
         logger.info("Analysis phase complete. Starting reporting phase...")
 
         self.target_file.results["metadata"]["analyzed_by"] = sorted(completed_plugins)
+
+        # Close out the run metadata.
+        run_metadata = self.target_file.results["metadata"]["run"]
+        run_metadata["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        run_metadata["duration_ms"] = round((time.time() - run_started_at) * 1000, 1)
 
         # 2. Generate Reports
         for reporter in self.reporters:

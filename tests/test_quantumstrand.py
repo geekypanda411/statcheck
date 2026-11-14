@@ -23,11 +23,15 @@ def analyzer():
 class Harness:
     """Minimal scaffolding to run the analyzer against a fake tool."""
 
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, monkeypatch):
         self.tmp_path = tmp_path
         self.target = TargetFile(str(tmp_path / "sample.bin"), "pe")
         self.run_dir = tmp_path / "run"
         self.run_dir.mkdir()
+        # Deterministic tool resolution: pretend the fake tool exists.
+        from src.analyzers import quantumstrand_analyzer as qs
+
+        monkeypatch.setattr(qs, "resolve_tool_path", lambda p: "/fake/bin/quantumstrand")
 
     def run(self, analyzer, config=None):
         analyzer.analyze(
@@ -40,16 +44,15 @@ class Harness:
 
 
 @pytest.fixture()
-def harness(tmp_path):
-    return Harness(tmp_path)
+def harness(tmp_path, monkeypatch):
+    return Harness(tmp_path, monkeypatch)
 
 
 def _patch_subprocess(monkeypatch, stdout):
     from src.analyzers import quantumstrand_analyzer as qs
 
     monkeypatch.setattr(
-        qs.subprocess,
-        "run",
+        qs, "run_tool",
         lambda cmd, **kwargs: SimpleNamespace(stdout=stdout, stderr="", returncode=0),
     )
 
@@ -99,8 +102,43 @@ def test_invalid_json_output_is_handled(monkeypatch, analyzer, harness):
     _patch_subprocess(monkeypatch, "not json at all")
 
     results = harness.run(analyzer)
-    # Must not raise, and must not publish a bogus result.
-    assert "quantumstrand" not in results["result_summary"]
+    # Must not raise; the failure is visible as an unavailable status.
+    summary = results["result_summary"]["quantumstrand"]
+    assert summary["status"] == "unavailable"
+
+
+def test_missing_tool_returns_unavailable(analyzer, harness, monkeypatch):
+    from src.analyzers import quantumstrand_analyzer as qs
+
+    monkeypatch.setattr(qs, "resolve_tool_path", lambda p: None)
+    analyzer.analyze(
+        harness.target,
+        tool_path="/nonexistent/quantumstrand",
+        plugin_config={},
+        run_dir=str(harness.run_dir),
+    )
+    summary = harness.target.results["result_summary"]["quantumstrand"]
+    assert summary["status"] == "unavailable"
+    assert "reason" in summary
+
+
+def test_tool_timeout_propagates(analyzer, harness, monkeypatch):
+    from src.analyzers import quantumstrand_analyzer as qs
+    from src.core.process import ToolTimeout
+
+    def exploding_run_tool(cmd, **kwargs):
+        raise ToolTimeout("quantumstrand timed out")
+
+    monkeypatch.setattr(qs, "run_tool", exploding_run_tool)
+    import pytest
+
+    with pytest.raises(ToolTimeout):
+        analyzer.analyze(
+            harness.target,
+            tool_path="/nonexistent/quantumstrand",
+            plugin_config={},
+            run_dir=str(harness.run_dir),
+        )
 
 
 def test_success_path_accepts_config_override_for_tags(monkeypatch, analyzer, harness):

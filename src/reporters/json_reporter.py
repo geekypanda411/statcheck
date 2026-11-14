@@ -42,6 +42,7 @@ class JsonReporter(BaseReporter):
 
         # Build the final dict, ensuring Metadata is firmly at the top!
         final_ordered_results = {
+            "schema_version": "1.0",
             "metadata": target_file.results.get("metadata", {}),
             "result_summary": order_results(target_file.results.get("result_summary", {})),
         }

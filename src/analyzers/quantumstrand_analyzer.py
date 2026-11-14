@@ -1,7 +1,7 @@
 import logging
-import subprocess
 import json
-from src.analyzers.base_analyzer import BaseAnalyzer
+from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -19,21 +19,44 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         min_string_length = plugin_config.get("min_string_length", 5)
         # Default to #winapi, but allow config overrides
         summary_tags = plugin_config.get("summary_tags", ["#winapi"])
-        
-        # RUN QS SUBPROCESS
+
+        #Resolve the QuantumStrand executable: configured path first, then PATH lookup.
+        executable = resolve_tool_path(tool_path)
+        if executable is None:
+            reason = f"quantumstrand binary not found (configured: '{tool_path}')."
+            logger.warning(reason)
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": reason,
+            })
+            return
+
+        timeout = self.resolve_timeout(plugin_config)
+        max_strings = int(self.get_limit("max_strings"))
+
+        # RUN QS SUBPROCESS (ToolTimeout propagates to the orchestrator so the
+        # run metadata records a 'timeout' status for this plugin.)
         try:
-            result = subprocess.run(
+            result = run_tool(
                 [
-                    tool_path, 
+                    executable, 
                     "-j", 
                     "-q", 
                     "-n", str(min_string_length), 
                     str(target_file.path)
                 ], 
-                capture_output=True, text=True, check=True
+                timeout=timeout
             )
-        except Exception as e:
+        except ToolTimeout:
+            # Let timeouts propagate so the orchestrator records a
+            # 'timeout' status for this plugin.
+            raise
+        except ToolError as e:
             logger.error(f"QUANTUMSTRAND execution failed: {e}")
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": str(e),
+            })
             return
 
         # PARSE JSON
@@ -41,6 +64,10 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
             qs_json = json.loads(result.stdout)
         except json.JSONDecodeError:
             logger.error("Failed to decode QUANTUMSTRAND JSON.")
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": "quantumstrand produced invalid JSON output.",
+            })
             return
 
         # EXTRACT METADATA
@@ -112,6 +139,14 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
                 if target_tag in tags_set:
                     clean_tag = target_tag.replace("#", "").replace("-", "_")
                     summary[f"{clean_tag}_strings"].add(string_val)
+
+        # Enforce the max_strings limit (Phase 3.4).
+        if len(ioc_extractor_input) > max_strings:
+            logger.warning(
+                f"quantumstrand: capping published strings at max_strings "
+                f"({len(ioc_extractor_input)} -> {max_strings})."
+            )
+            ioc_extractor_input = ioc_extractor_input[:max_strings]
 
         summary["raw_output_path"] = self.save_raw(run_dir, "quantumstrand_raw_output.json", qs_json)
 

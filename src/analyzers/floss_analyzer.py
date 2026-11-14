@@ -1,8 +1,7 @@
 import logging
-import subprocess
 import json
-from src.analyzers.base_analyzer import BaseAnalyzer
-import os
+from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +16,34 @@ class FlossAnalyzer(BaseAnalyzer):
         
         min_length_string = plugin_config.get("min_string_length", 5)
         logger.debug(f"Minimum string length for floss set to {min_length_string}")
-        
-        # RUN FLOSS SUBPROCESS
+
+        # Resolve the FLOSS executable: configured path first, then PATH lookup.
+        executable = resolve_tool_path(tool_path)
+        if executable is None:
+            reason = f"floss binary not found (configured: '{tool_path}')."
+            logger.warning(reason)
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": reason,
+            })
+            return
+
+        timeout = self.resolve_timeout(plugin_config)
+        max_strings = int(self.get_limit("max_strings"))
+
+        # RUN FLOSS SUBPROCESS (ToolTimeout propagates to the orchestrator so
+        # the run metadata records a 'timeout' status for this plugin.)
         try:
-            result = subprocess.run(
-                [tool_path, "-j", "-q", "-n", str(min_length_string), str(target_file.path)], 
-                capture_output=True, text=True, check=True
+            result = run_tool(
+                [executable, "-j", "-q", "-n", str(min_length_string), str(target_file.path)],
+                timeout=timeout
             )
-        except Exception as e:
+        except ToolError as e:
             logger.error(f"FLOSS execution failed: {e}")
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": str(e),
+            })
             return
 
         plugin_dir = self.get_plugin_dir(run_dir)
@@ -35,11 +53,11 @@ class FlossAnalyzer(BaseAnalyzer):
             floss_json = json.loads(result.stdout)
         except json.JSONDecodeError:
             logger.error("Failed to decode FLOSS JSON.")
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": "floss produced invalid JSON output.",
+            })
             return
-
-        raw_output_path = os.path.join(plugin_dir, "floss_raw_output.json")
-        with open(raw_output_path, "w") as f:
-            json.dump(floss_json, f, indent=4)
 
         summary = {}
 
@@ -66,7 +84,7 @@ class FlossAnalyzer(BaseAnalyzer):
             "version": metadata_block.get("version", "Unknown")
         }
 
-        summary["raw_output_path"] = raw_output_path
+        summary["raw_output_path"] = self.save_raw(run_dir, "floss_raw_output.json", floss_json)
 
         # EXTRACT & DEDUPLICATE STRINGS using set
         extracted_strings = set()
@@ -83,6 +101,14 @@ class FlossAnalyzer(BaseAnalyzer):
         # NORMALIZE FOR THE IOC Extractor
         # The Extractor expects a list of dictionaries with "string" and "tags"
         ioc_input_list = [{"string": s, "tags": []} for s in extracted_strings]
+
+        # Enforce the max_strings limit (Phase 3.4).
+        if len(ioc_input_list) > max_strings:
+            logger.warning(
+                f"floss: capping published strings at max_strings "
+                f"({len(ioc_input_list)} -> {max_strings})."
+            )
+            ioc_input_list = ioc_input_list[:max_strings]
 
         if not ioc_input_list:
             logger.warning("FLOSS did not find any strings in the file.")
