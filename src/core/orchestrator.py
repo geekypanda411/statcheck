@@ -20,17 +20,25 @@ class Orchestrator:
         self.analyzers = []
         self.reporters = []
         logger.debug(f"Orchestrator initialized for file: {file_path} with format: {file_format}")
-        self.config = self._load_config(config_path)
-        self.reporter_config = self._load_config(reporter_config_path)
+        self.config = self._load_tool_config(config_path)
+        self.reporter_config = self._load_reporter_config(reporter_config_path)
         self.bin_dir = os.path.abspath(self.config.get("bin_path", "./bin"))
 
-    def _load_config(self, config_path: str) -> dict:
+    def _load_tool_config(self, config_path: str) -> dict:
+        # Consumers read config["plugins"], so the fallback must use that
+        # namespace (not "tools") or every plugin lookup would miss.
+        return self._load_config(config_path, default={"bin_path": "./bin", "plugins": {}})
+
+    def _load_reporter_config(self, config_path: str) -> dict:
+        return self._load_config(config_path, default={"reporters": {}})
+
+    def _load_config(self, config_path: str, default: dict) -> dict:
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 return json.load(f)
         else:
             logger.warning(f"Config file {config_path} not found. Using defaults.")
-            return {"bin_path": "./bin", "tools": {}}
+            return default
 
     def _import_plugin_files(self, file_paths: list):
         if not hasattr(self, '_loaded_modules'):
