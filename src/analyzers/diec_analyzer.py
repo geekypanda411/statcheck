@@ -1,9 +1,10 @@
+import json
 import logging
+from functools import reduce
 from pathlib import Path
+
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
 from src.core.process import ToolError, run_tool
-import json
-from functools import reduce
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class DIEAnalyzer(BaseAnalyzer):
                 logger.warning(f"DiE ({flag}) failed to execute: {e}")
             except json.JSONDecodeError:
                 logger.warning(f"DiE ({flag}) output could not be parsed as JSON.")
-            except Exception as e:
+            except Exception:
                 logger.exception(f"Unexpected error in DiE task '{task_name}'")
 
         # Always write the raw output, even when empty/failed.

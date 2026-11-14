@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+
 from src.core.target_file import TargetFile
+
 
 class BaseReporter(ABC):
     @property

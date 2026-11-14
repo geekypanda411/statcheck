@@ -1,5 +1,6 @@
-import logging
 import json
+import logging
+
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
 from src.core.process import ToolError, ToolTimeout, run_tool
 

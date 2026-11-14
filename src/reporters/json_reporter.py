@@ -1,8 +1,8 @@
 import json
-import os
 import logging
+import os
 import re
-import time
+
 from src.reporters.base_reporter import BaseReporter
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,9 @@ class JsonReporter(BaseReporter):
             # Phase 2: Orphan catcher (plugins that ran but aren't in the template)
             for plugin_id, data in raw_data.items():
                 if plugin_id not in ordered_data:
-                    logger.info(f"Plugin with plugin_id: {plugin_id} not found in template, attaching the results at the end. Please revise the template")
+                    logger.info(
+                        f"Plugin with plugin_id: {plugin_id} not found in template, "
+                        f"attaching the results at the end. Please revise the template")
                     ordered_data[plugin_id] = data
                     
             return ordered_data
@@ -57,4 +59,5 @@ class JsonReporter(BaseReporter):
             logger.error(f"Permission denied: Could not write JSON report to {output_path}")
         except Exception as e:
             # for any unexpected file I/O or serialization errors
-            logger.exception(f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}")
+            logger.exception(
+                f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}")

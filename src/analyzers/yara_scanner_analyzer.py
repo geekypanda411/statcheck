@@ -1,7 +1,9 @@
+import json
 import logging
 import os
-import json
+
 import yara
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)

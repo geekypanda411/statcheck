@@ -1,13 +1,14 @@
 import logging
 import re
-import os
 import time
-from pathlib import Path
-import requests
 from collections import defaultdict
+from pathlib import Path
+
+import requests
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 from src.core.cache import cache_dir, read_json, write_json
-from src.core.paths import PROJECT_ROOT, resolve_path
+from src.core.paths import resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
                 logger.warning(f"Failed to fetch TLD updates: {e}")
 
         if tld_file.exists():
-            with open(tld_file, "r", encoding="utf-8") as f:
+            with open(tld_file, encoding="utf-8") as f:
                 return [line.strip() for line in f if line.strip()]
         return ["com", "net", "org", "io", "xyz"] # Fallback
 
@@ -89,7 +90,7 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
 
         # Loop through all complete results to find published inputs
         internal_context = target_file.results.get("internal_context", {})
-        for source_plugin_id, data in internal_context.items():
+        for _source_plugin_id, data in internal_context.items():
             inputs = data.get("ioc_extractor_input", [])
             for item in inputs:
                 s_val = item.get("string")
@@ -105,6 +106,16 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         if not master_string_pool:
             logger.info("No published strings found for extraction.")
             return
+
+        # Enforce the max_strings limit (Phase 3.4): cap the input text fed
+        # to the regex engine.
+        max_strings = int(self.get_limit("max_strings"))
+        if len(master_string_pool) > max_strings:
+            logger.warning(
+                f"iocextractor: capping input strings at max_strings "
+                f"({len(master_string_pool)} -> {max_strings})."
+            )
+            master_string_pool = master_string_pool[:max_strings]
 
         logger.info(f"Strings passed to Regex: {len(master_string_pool)}")
         massive_text_block = "\n".join(master_string_pool)
@@ -127,7 +138,9 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
 
         # Registry Keys, gated to pe files only
         if target_file.format == 'pe':
-            registry_regex = r'(?i)\b(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\[a-zA-Z0-9_\-\s]{1,255})+'
+            hive_prefixes = ("HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|"
+                             "HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC")
+            registry_regex = rf'(?i)\b(?:{hive_prefixes})(?:\\[a-zA-Z0-9_\-\s]{{1,255}})+'
             raw_regpaths = list(set(re.findall(registry_regex, massive_text_block)))
             massive_text_block = re.sub(registry_regex, " ", massive_text_block)
 
@@ -142,23 +155,27 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         # - Negative lookbehind (?<![/\\]) ensures we don't accidentally rip "file.zip" out of a filepath
         # - Positive lookahead (?=\n|:|$) ensures it ends cleanly
         tld_pattern = "|".join(tld_list)
-        domain_regex = rf'(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+(?:{tld_pattern})(?=\n|:|$)'
+        domain_regex = (rf'(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+'
+                        rf'(?:{tld_pattern})(?=\n|:|$)')
         raw_domains = list(set(d.lower() for d in re.findall(domain_regex, massive_text_block)))
         raw_domains = [d for d in raw_domains if len(d) <= 255] # Total DNS limit
         massive_text_block = re.sub(domain_regex, " ", massive_text_block)
 
         # File Paths (OS Constrained, End of Line Anchored)
         # Windows: Drive letter, forbidden chars < > : " / \ | ? *, segment len 1-255
-        win_filepath_regex = r'(?i)\b[A-Z]:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255}(?:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255})*(?<![ \.])(?=\n|$)'
+        win_filepath_regex = (r'(?i)\b[A-Z]:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255}'
+                              r'(?:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255})*(?<![ \.])(?=\n|$)')
         raw_win_paths = list(set(re.findall(win_filepath_regex, massive_text_block)))
         raw_win_paths = [p for p in raw_win_paths if len(p) <= 32760]
 
-        # Unix: Allows spaces anywhere (Adds false positives but unix allows the behavious and a ta may use this), max 4096 length
+        # Unix: Allows spaces anywhere (unix permits this behavior, adds FPs); max 4096 length
         unix_filepath_regex = r'(?i)(?:[a-zA-Z0-9_\-\.\ ]{1,255})?(?:/[a-zA-Z0-9_\-\.\ ]{1,255})+(?=\n|$)'
         raw_nix_paths = list(set(re.findall(unix_filepath_regex, massive_text_block)))
         raw_nix_paths = [p for p in raw_nix_paths if len(p) <= 4096]
 
         # SAVE RESULTS
+        # Enforce the max_summary_items limit per category (Phase 3.4).
+        max_items = int(self.get_limit("max_summary_items"))
         summary = {
             "regex_urls": raw_urls,
             "regex_regpath": raw_regpaths,
@@ -167,6 +184,12 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
             "regex_winfilepath": raw_win_paths,
             "regex_unixfilepath": raw_nix_paths
         }
+        for key, items in summary.items():
+            if len(items) > max_items:
+                logger.warning(
+                    f"iocextractor: capping '{key}' at max_summary_items ({len(items)} -> {max_items})."
+                )
+                summary[key] = items[:max_items]
 
         clean_summary = {k: v for k, v in summary.items() if v}
         

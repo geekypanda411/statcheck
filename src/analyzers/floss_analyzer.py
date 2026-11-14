@@ -1,7 +1,8 @@
-import logging
 import json
+import logging
+
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
-from src.core.process import ToolError, ToolTimeout, run_tool
+from src.core.process import ToolError, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,6 @@ class FlossAnalyzer(BaseAnalyzer):
             })
             return
 
-        plugin_dir = self.get_plugin_dir(run_dir)
-
         # PARSE JSON & FLATTEN STRINGS
         try:
             floss_json = json.loads(result.stdout)
@@ -91,7 +90,7 @@ class FlossAnalyzer(BaseAnalyzer):
         strings_block = floss_json.get("strings", {})
         
         # Iterate through every category (decoded, static, stack, etc.)
-        for category, string_list in strings_block.items():
+        for _category, string_list in strings_block.items():
             if isinstance(string_list, list):
                 for string_item in string_list:
                     # Check if it's a dict and has the "string" key

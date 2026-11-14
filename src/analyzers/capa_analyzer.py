@@ -1,8 +1,9 @@
+import json
 import logging
 from pathlib import Path
+
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
 from src.core.process import ToolError, run_tool
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class CapaAnalyzer(BaseAnalyzer):
                 logger.warning(f"capa ({flag}) failed to execute: {e}")
             except json.JSONDecodeError:
                 logger.warning(f"capa ({flag}) output could not be parsed as JSON.")
-            except Exception as e:
+            except Exception:
                 logger.exception(f"Unexpected error in capa task '{task_name}'")
          
         logger.debug("Parsing capa output")

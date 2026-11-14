@@ -1,10 +1,12 @@
-import logging
 import hashlib
+import logging
 import math
-import pefile
-import tlsh
-import ppdeep
 import mimetypes
+
+import pefile
+import ppdeep
+import tlsh
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -53,13 +55,15 @@ class BasicInfoAnalyzer(BaseAnalyzer):
         
         try:
             ssdeep_hash = ppdeep.hash(file_data)
-            if ssdeep_hash: summary["File_ssdeep"] = ssdeep_hash
+            if ssdeep_hash:
+                summary["File_ssdeep"] = ssdeep_hash
         except Exception as e:
             logger.warning(f"Failed to calculate SSDeep: {e}")
 
         try:
             tlsh_hash = tlsh.hash(file_data)
-            if tlsh_hash and tlsh_hash != "TNULL": 
+            if tlsh_hash and tlsh_hash != "TNULL":
+                 
                 summary["File_tlsh"] = tlsh_hash
         except Exception as e:
             logger.warning(f"Failed to calculate TLSH: {e}")
@@ -67,7 +71,8 @@ class BasicInfoAnalyzer(BaseAnalyzer):
         try:
             pe = pefile.PE(target_file.path)
             imphash = pe.get_imphash()
-            if imphash: summary["File_imphash"] = imphash
+            if imphash:
+                summary["File_imphash"] = imphash
         except pefile.PEFormatError:
             pass # Not a PE file, totally fine.
         except Exception as e:

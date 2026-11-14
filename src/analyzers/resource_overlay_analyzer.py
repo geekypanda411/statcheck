@@ -1,10 +1,12 @@
+import hashlib
 import logging
 import math
 import os
-import hashlib
 import re
-import pefile
+
 import lief
+import pefile
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -16,25 +18,29 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
     
     depends = {"all": [], "any": []}
 
-    # Extraction safety limits (Phase 3.4 defaults; overridable via config).
-    DEFAULT_MAX_RESOURCE_BYTES = 100 * 1024 * 1024        # 100 MiB per artifact
-    DEFAULT_MAX_TOTAL_EXTRACTED_BYTES = 1024 * 1024 * 1024  # 1 GiB per run
-
     def _calc_entropy(self, data):
-        if not data: return 0.0
+        if not data:
+            return 0.0
         entropy = 0
         for x in range(256):
             p_x = float(data.count(x)) / len(data)
-            if p_x > 0: entropy += - p_x * math.log2(p_x)
+            if p_x > 0:
+                entropy += - p_x * math.log2(p_x)
         return round(entropy, 4)
 
     def _get_magic_type(self, data):
-        if data.startswith(b'MZ'): return "Windows Executable (MZ)"
-        if data.startswith(b'\x7FELF'): return "Linux Executable (ELF)"
-        if data.startswith(b'PK\x03\x04'): return "ZIP Archive"
-        if data.startswith(b'Rar!\x1a\x07'): return "RAR Archive"
-        if data.startswith(b'7z\xbc\xaf\x27\x1c'): return "7z Archive"
-        if data.startswith(b'\x1f\x8b\x08'): return "GZIP Archive"
+        if data.startswith(b'MZ'):
+            return "Windows Executable (MZ)"
+        if data.startswith(b'\x7FELF'):
+            return "Linux Executable (ELF)"
+        if data.startswith(b'PK\x03\x04'):
+            return "ZIP Archive"
+        if data.startswith(b'Rar!\x1a\x07'):
+            return "RAR Archive"
+        if data.startswith(b'7z\xbc\xaf\x27\x1c'):
+            return "7z Archive"
+        if data.startswith(b'\x1f\x8b\x08'):
+            return "GZIP Archive"
         return "Unknown Data"
 
     @staticmethod
@@ -52,8 +58,9 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
         
         extract_rsrc = plugin_config.get("extract_resources", True)
         extract_ovl = plugin_config.get("extract_overlay", True)
-        max_resource_bytes = int(plugin_config.get("max_resource_bytes", self.DEFAULT_MAX_RESOURCE_BYTES))
-        max_total_extracted = int(plugin_config.get("max_total_extracted_bytes", self.DEFAULT_MAX_TOTAL_EXTRACTED_BYTES))
+        max_resource_bytes = int(plugin_config.get("max_resource_bytes", self.get_limit("max_resource_bytes")))
+        max_total_extracted = int(plugin_config.get(
+            "max_total_extracted_bytes", self.get_limit("max_total_extracted_bytes")))
         plugin_dir = self.get_plugin_dir(run_dir)
         
         # Output Directories
@@ -125,7 +132,8 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
                                 size = resource_lang.data.struct.Size
                                 res_data = image[offset:offset+size]
                                 
-                                if not res_data: continue
+                                if not res_data:
+                                    continue
                                 
                                 entropy = self._calc_entropy(res_data)
                                 sha256 = hashlib.sha256(res_data).hexdigest()
@@ -139,16 +147,17 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
                                 
                                 # Extract to disk if configured (with size limits)
                                 extracted_path = None
-                                if extract_rsrc and is_risk:
-                                    if budget_extract(size, f"resource {res_type_str}/{res_id}"):
-                                        os.makedirs(rsrc_out_dir, exist_ok=True)
-                                        file_name = self._resource_filename(res_type_str, str(res_id), lang_id)
-                                        extracted_path = os.path.join(rsrc_out_dir, file_name)
-                                        with open(extracted_path, "wb") as out_f:
-                                            out_f.write(res_data)
-                                        total_extracted_bytes += size
-                                        # Reports carry run-dir-relative paths only.
-                                        extracted_path = os.path.relpath(extracted_path, start=run_dir)
+                                may_extract = extract_rsrc and is_risk
+                                label = f"resource {res_type_str}/{res_id}"
+                                if may_extract and budget_extract(size, label):
+                                    os.makedirs(rsrc_out_dir, exist_ok=True)
+                                    file_name = self._resource_filename(res_type_str, str(res_id), lang_id)
+                                    extracted_path = os.path.join(rsrc_out_dir, file_name)
+                                    with open(extracted_path, "wb") as out_f:
+                                        out_f.write(res_data)
+                                    total_extracted_bytes += size
+                                    # Reports carry run-dir-relative paths only.
+                                    extracted_path = os.path.relpath(extracted_path, start=run_dir)
                                 
                                 summary["resources"].append({
                                     "id": res_id,
@@ -240,8 +249,7 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
             
             # Extract to disk if configured (with size limits)
             extracted_ovl_path = None
-            if extract_ovl:
-                if budget_extract(len(overlay_data), "overlay"):
+            if extract_ovl and budget_extract(len(overlay_data), "overlay"):
                     os.makedirs(ovl_out_dir, exist_ok=True)
                     extracted_ovl_path = os.path.join(ovl_out_dir, "extracted_overlay.bin")
                     with open(extracted_ovl_path, "wb") as out_f:
@@ -260,8 +268,10 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
             })
 
         # Deterministic ordering of resource entries.
-        summary["resources"].sort(key=lambda r: (str(r["resource_type"]), str(r["id"]), str(r["language"]), r["offset"]))
-        complete["raw_resources"].sort(key=lambda r: (str(r["type"]), str(r["id"]), str(r["language"]), r["offset"]))
+        summary["resources"].sort(
+            key=lambda r: (str(r["resource_type"]), str(r["id"]), str(r["language"]), r["offset"]))
+        complete["raw_resources"].sort(
+            key=lambda r: (str(r["type"]), str(r["id"]), str(r["language"]), r["offset"]))
 
         # --- SAVE RESULTS ---
         # The raw contract: always write the raw file, and the summary must

@@ -1,7 +1,9 @@
-import logging
-import pefile
 import json
+import logging
 import os
+
+import pefile
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
