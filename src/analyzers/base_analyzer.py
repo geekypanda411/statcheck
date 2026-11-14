@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 # Default resource limits (Phase 3.4). Overridable via the "limits" section
 # of tools_config.json (which feeds RuntimeContext.limits).
 DEFAULT_LIMITS = {
-    "max_file_bytes": 2 * 1024 ** 3,           # 2 GiB input
-    "max_resource_bytes": 100 * 1024 ** 2,     # 100 MiB per extracted artifact
-    "max_total_extracted_bytes": 1024 ** 3,    # 1 GiB per run
-    "max_raw_json_mb": 512,                    # raw JSON files per plugin
-    "max_summary_items": 10000,                # per summary category
-    "max_strings": 1_000_000,                  # strings fed to IOC extraction
-    "max_ioc_text_mb": 64,                     # text block fed to IOC regexes
-    "max_matches": 1000,                       # YARA matches kept per run
+    "max_file_bytes": 2 * 1024**3,  # 2 GiB input
+    "max_resource_bytes": 100 * 1024**2,  # 100 MiB per extracted artifact
+    "max_total_extracted_bytes": 1024**3,  # 1 GiB per run
+    "max_raw_json_mb": 512,  # raw JSON files per plugin
+    "max_summary_items": 10000,  # per summary category
+    "max_strings": 1_000_000,  # strings fed to IOC extraction
+    "max_ioc_text_mb": 64,  # text block fed to IOC regexes
+    "max_matches": 1000,  # YARA matches kept per run
 }
 
 
@@ -29,6 +29,7 @@ class RuntimeContext:
     Lets plugins reach paths, timeouts, and limits without changing the
     public ``analyze()`` signature.
     """
+
     config_path: Path
     run_dir: Path
     project_root: Path
@@ -65,7 +66,7 @@ class BaseAnalyzer(ABC):
 
     @property
     def plugin_id(self) -> str:
-        #Optional: to look up tool path and plugin config in tools_config.json
+        # Optional: to look up tool path and plugin config in tools_config.json
         return None
 
     @property
@@ -104,7 +105,7 @@ class BaseAnalyzer(ABC):
             return 300.0
 
     def get_plugin_dir(self, run_dir: str) -> str:
-        #Helper to dynamically create and return this plugin's dedicated output folder
+        # Helper to dynamically create and return this plugin's dedicated output folder
         plugin_dir = os.path.join(run_dir, self.plugin_id)
         os.makedirs(plugin_dir, exist_ok=True)
         return plugin_dir
@@ -132,11 +133,14 @@ class BaseAnalyzer(ABC):
                 f"{self.plugin_id}: raw output exceeds max_raw_json_mb "
                 f"({len(text) // (1024 * 1024)} MiB); writing truncated stub instead."
             )
-            text = json.dumps({
-                "status": "truncated",
-                "reason": "raw output exceeded max_raw_json_mb limit",
-                "approx_size_bytes": len(text),
-            }, indent=4)
+            text = json.dumps(
+                {
+                    "status": "truncated",
+                    "reason": "raw output exceeded max_raw_json_mb limit",
+                    "approx_size_bytes": len(text),
+                },
+                indent=4,
+            )
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)

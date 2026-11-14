@@ -26,8 +26,9 @@ def _run_floss(monkeypatch, tmp_path):
     run_dir = tmp_path / f"run-{id(target)}"
     run_dir.mkdir()
     monkeypatch.setattr(fa, "resolve_tool_path", lambda p: "/fake/floss")
-    monkeypatch.setattr(fa, "run_tool",
-                        lambda cmd, **kw: SimpleNamespace(stdout=json.dumps(FLOSS_PAYLOAD), returncode=0))
+    monkeypatch.setattr(
+        fa, "run_tool", lambda cmd, **kw: SimpleNamespace(stdout=json.dumps(FLOSS_PAYLOAD), returncode=0)
+    )
     analyzer = FlossAnalyzer()
     analyzer.analyze(target, tool_path="/x", plugin_config={}, run_dir=str(run_dir))
     return target, run_dir
@@ -44,8 +45,7 @@ def _run_ioc(monkeypatch, tmp_path, target):
     (cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
 
     analyzer = IOCExtractorAnalyzer()
-    analyzer.analyze(target, tool_path="", plugin_config={"tld_file": str(tld_file)},
-                     run_dir=str(tmp_path / "run"))
+    analyzer.analyze(target, tool_path="", plugin_config={"tld_file": str(tld_file)}, run_dir=str(tmp_path / "run"))
     return target
 
 
@@ -98,10 +98,9 @@ def test_ioc_extraction_deterministic_under_random_hashseed(tmp_path):
         "tld = {tld!r}\n"
         "analyzer = IOCExtractorAnalyzer()\n"
         "analyzer.analyze(target, '', {{'tld_file': tld}}, {run!r})\n"
-        "print(json.dumps(target.results['result_summary'].get('iocextractor', {{}}), sort_keys=True))\n"
-        .format(root=str(Path(__file__).resolve().parents[1]),
-                tld=str(tmp_path / "tlds.txt"),
-                run=str(tmp_path / "run"))
+        "print(json.dumps(target.results['result_summary'].get('iocextractor', {{}}), sort_keys=True))\n".format(
+            root=str(Path(__file__).resolve().parents[1]), tld=str(tmp_path / "tlds.txt"), run=str(tmp_path / "run")
+        )
     )
     (tmp_path / "tlds.txt").write_text("com\nnet\nevil\n")
 
@@ -111,8 +110,7 @@ def test_ioc_extraction_deterministic_under_random_hashseed(tmp_path):
         import os
 
         env = dict(os.environ, **env_seed)
-        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
-                                env=env, timeout=60)
+        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=60)
         assert result.returncode == 0, result.stderr
         outputs.append(result.stdout)
 

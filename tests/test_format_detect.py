@@ -43,7 +43,6 @@ def test_cafebabe_disambiguated_as_macho_when_lief_parses(tmp_path, monkeypatch)
     f = tmp_path / "fat.macho"
     f.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 64)
 
-
     class FakeFatBinary:
         def __len__(self):
             return 1  # one recovered architecture => genuine fat Mach-O

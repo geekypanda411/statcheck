@@ -33,8 +33,7 @@ def _json_default(obj):
         return obj.hex()
     if _strict_serialization():
         raise TypeError(f"Cannot serialize object of type {type(obj).__name__} in strict mode")
-    logger.warning(f"JSON report: serializing unknown object of type "
-                   f"{type(obj).__name__} via str() fallback.")
+    logger.warning(f"JSON report: serializing unknown object of type {type(obj).__name__} via str() fallback.")
     return str(obj)
 
 
@@ -46,33 +45,34 @@ class JsonReporter(BaseReporter):
     def generate(self, target_file, run_dir, reporter_config, timestamp):
         logger.debug(f"Starting JSON report generation for {target_file.filename}")
 
-        sanitized_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', target_file.filename)
+        sanitized_name = re.sub(r"[^a-zA-Z0-9.-]+", "_", target_file.filename)
         timestamp_unix = timestamp
         output_filename = f"{sanitized_name}_statcheck_summary_{timestamp_unix}.json"
         output_path = os.path.join(run_dir, output_filename)
 
-        #Template based report section sorting
+        # Template based report section sorting
         template_order = reporter_config.get("output_template", [])
 
         def order_results(raw_data):
-            #Orders a dictionary based on the template, placing orphans at the end
-            #in deterministic (sorted) order.
+            # Orders a dictionary based on the template, placing orphans at the end
+            # in deterministic (sorted) order.
             ordered_data = {}
-            
+
             # Phase 1: Explicitly template-ordered items
             for plugin_id in template_order:
                 if plugin_id in raw_data:
                     ordered_data[plugin_id] = raw_data[plugin_id]
-                    
+
             # Phase 2: Orphan catcher (plugins that ran but aren't in the template),
             # sorted so identical runs produce byte-identical reports.
             for plugin_id in sorted(raw_data):
                 if plugin_id not in ordered_data:
                     logger.info(
                         f"Plugin with plugin_id: {plugin_id} not found in template, "
-                        f"attaching the results at the end. Please revise the template")
+                        f"attaching the results at the end. Please revise the template"
+                    )
                     ordered_data[plugin_id] = raw_data[plugin_id]
-                    
+
             return ordered_data
 
         # Build the final dict, ensuring Metadata is firmly at the top!
@@ -81,16 +81,17 @@ class JsonReporter(BaseReporter):
             "metadata": target_file.results.get("metadata", {}),
             "result_summary": order_results(target_file.results.get("result_summary", {})),
         }
-        
+
         try:
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(final_ordered_results, f, indent=4, default=_json_default)
-                
+
             logger.info(f"Successfully generated JSON report at: {output_path}")
-            
+
         except PermissionError:
             logger.error(f"Permission denied: Could not write JSON report to {output_path}")
         except Exception as e:
             # for any unexpected file I/O or serialization errors
             logger.exception(
-                f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}")
+                f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}"
+            )

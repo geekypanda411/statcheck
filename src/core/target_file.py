@@ -18,8 +18,14 @@ class TargetFile:
         if internal_context_data is not None:
             self.results.setdefault("internal_context", {})[tool_name] = internal_context_data
 
-    def set_plugin_status(self, plugin_id: str, status: str, error: str | None = None,
-                          duration_ms: float | None = None, tool: str | None = None):
+    def set_plugin_status(
+        self,
+        plugin_id: str,
+        status: str,
+        error: str | None = None,
+        duration_ms: float | None = None,
+        tool: str | None = None,
+    ):
         """Record per-plugin execution status in metadata.plugins.
 
         Statuses: completed, failed, skipped_disabled, skipped_dependency,
@@ -46,6 +52,7 @@ class TargetFile:
         Falls back to a plain (cached) read when mmap is not possible.
         """
         import mmap
+
         try:
             # The mmap stays valid after the fd is closed on POSIX platforms.
             with open(self.path, "rb") as f:

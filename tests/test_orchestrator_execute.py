@@ -54,8 +54,9 @@ class DependentAnalyzer(BaseAnalyzer):
 
 @pytest.fixture()
 def app(tmp_path, project_root):
-    app = Orchestrator(str(tmp_path / "x.bin"), "pe", str(tmp_path / "no-config.json"),
-                       str(tmp_path / "no-reporter-config.json"))
+    app = Orchestrator(
+        str(tmp_path / "x.bin"), "pe", str(tmp_path / "no-config.json"), str(tmp_path / "no-reporter-config.json")
+    )
     app.load_reporters(str(project_root / "src" / "reporters"), desired_reporter=["json"])
     return app
 
@@ -86,7 +87,9 @@ def test_timeout_status_recorded(app, tmp_path):
 
 def test_skipped_disabled_status(app, tmp_path):
     run_dir, app = _run(
-        app, [OkAnalyzer(), CrashingAnalyzer()], tmp_path,
+        app,
+        [OkAnalyzer(), CrashingAnalyzer()],
+        tmp_path,
         config={"stub_crash": {"enabled": False}},
     )
     plugins = app.target_file.results["metadata"]["plugins"]
@@ -96,7 +99,9 @@ def test_skipped_disabled_status(app, tmp_path):
 
 def test_cascade_skip_records_skipped_dependency(app, tmp_path):
     run_dir, app = _run(
-        app, [OkAnalyzer(), DependentAnalyzer()], tmp_path,
+        app,
+        [OkAnalyzer(), DependentAnalyzer()],
+        tmp_path,
         config={"stub_ok": {"enabled": False}},
     )
     plugins = app.target_file.results["metadata"]["plugins"]

@@ -52,7 +52,8 @@ def _patch_subprocess(monkeypatch, stdout):
     from src.analyzers import quantumstrand_analyzer as qs
 
     monkeypatch.setattr(
-        qs, "run_tool",
+        qs,
+        "run_tool",
         lambda cmd, **kwargs: SimpleNamespace(stdout=stdout, stderr="", returncode=0),
     )
 

@@ -6,30 +6,34 @@ from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
+
 class QuantumStrandAnalyzer(BaseAnalyzer):
     name = "QUANTUMSTRAND String Extractor BETA"
-    supported_formats = ['all']
+    supported_formats = ["all"]
     plugin_id = "quantumstrand"
-    
+
     # Needs no dependencies. Runs immediately.
     depends = {"all": [], "any": []}
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Starting QUANTUMSTRAND (BETA) analysis on {target_file.filename}")
-        
+
         min_string_length = plugin_config.get("min_string_length", 5)
         # Default to #winapi, but allow config overrides
         summary_tags = plugin_config.get("summary_tags", ["#winapi"])
 
-        #Resolve the QuantumStrand executable: configured path first, then PATH lookup.
+        # Resolve the QuantumStrand executable: configured path first, then PATH lookup.
         executable = resolve_tool_path(tool_path)
         if executable is None:
             reason = f"quantumstrand binary not found (configured: '{tool_path}')."
             logger.warning(reason)
-            target_file.add_result(self.plugin_id, summary_data={
-                "status": "unavailable",
-                "reason": reason,
-            })
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={
+                    "status": "unavailable",
+                    "reason": reason,
+                },
+            )
             return
 
         timeout = self.resolve_timeout(plugin_config)
@@ -39,14 +43,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         # run metadata records a 'timeout' status for this plugin.)
         try:
             result = run_tool(
-                [
-                    executable, 
-                    "-j", 
-                    "-q", 
-                    "-n", str(min_string_length), 
-                    str(target_file.path)
-                ], 
-                timeout=timeout
+                [executable, "-j", "-q", "-n", str(min_string_length), str(target_file.path)], timeout=timeout
             )
         except ToolTimeout:
             # Let timeouts propagate so the orchestrator records a
@@ -54,10 +51,13 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
             raise
         except ToolError as e:
             logger.error(f"QUANTUMSTRAND execution failed: {e}")
-            target_file.add_result(self.plugin_id, summary_data={
-                "status": "unavailable",
-                "reason": str(e),
-            })
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={
+                    "status": "unavailable",
+                    "reason": str(e),
+                },
+            )
             return
 
         # PARSE JSON
@@ -65,21 +65,24 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
             qs_json = json.loads(result.stdout)
         except json.JSONDecodeError:
             logger.error("Failed to decode QUANTUMSTRAND JSON.")
-            target_file.add_result(self.plugin_id, summary_data={
-                "status": "unavailable",
-                "reason": "quantumstrand produced invalid JSON output.",
-            })
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={
+                    "status": "unavailable",
+                    "reason": "quantumstrand produced invalid JSON output.",
+                },
+            )
             return
 
         # EXTRACT METADATA
         meta_block = qs_json.get("meta", {})
-        
+
         summary = {
             "metadata": {
                 "version": meta_block.get("version", "Unknown"),
                 "timestamp": meta_block.get("timestamp", "Unknown"),
                 "sha256": meta_block.get("sample", {}).get("sha256", "Unknown"),
-                "min_str_len": meta_block.get("min_str_len", min_string_length)
+                "min_str_len": meta_block.get("min_str_len", min_string_length),
             }
         }
 
@@ -93,22 +96,22 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         deduped_strings = {}
 
         def traverse_layout(node):
-            #Recursively hunt through the layout tree for the 'strings' arrays.
+            # Recursively hunt through the layout tree for the 'strings' arrays.
             if not isinstance(node, dict):
                 return
-            
+
             # Extract strings at the current node
             for s_obj in node.get("strings", []):
                 s_val = s_obj.get("string")
                 if s_val:
                     tags = s_obj.get("tags", [])
-                    
+
                     # If string exists, merge the new tags into the existing set
                     if s_val not in deduped_strings:
                         deduped_strings[s_val] = set(tags)
                     else:
                         deduped_strings[s_val].update(tags)
-                        
+
             # Recursively dig into children nodes (e.g., .text, .rsrc)
             for child in node.get("children", []):
                 traverse_layout(child)
@@ -130,11 +133,8 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
 
         for string_val, tags_set in deduped_strings.items():
             # 1. Format the Pub/Sub contract for the IOC Extractor
-            ioc_extractor_input.append({
-                "string": string_val,
-                "tags": sorted(tags_set)
-            })
-            
+            ioc_extractor_input.append({"string": string_val, "tags": sorted(tags_set)})
+
             # 2. Check if this string belongs in our Summary block
             for target_tag in summary_tags:
                 if target_tag in tags_set:
@@ -156,10 +156,8 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
 
         # PUBLISH RESULTS
         target_file.add_result(
-            self.plugin_id, 
+            self.plugin_id,
             summary_data=clean_summary,
-            internal_context_data={
-                "ioc_extractor_input": ioc_extractor_input
-            }
+            internal_context_data={"ioc_extractor_input": ioc_extractor_input},
         )
         logger.info(f"QUANTUMSTRAND published {len(ioc_extractor_input)} deduplicated strings.")

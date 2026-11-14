@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+bin/*
+!bin/README.md
+yara_rules/*
+reports/*
+test_binaries/*
+tools_config.json
+.env
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docs

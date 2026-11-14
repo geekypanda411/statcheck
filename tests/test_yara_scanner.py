@@ -79,12 +79,10 @@ def test_compile_cache_invalidates_on_rule_change(rules_dir):
 
 def test_namespaces_are_relative_to_rule_path(rules_dir, monkeypatch):
     captured = {}
-    monkeypatch.setattr(ysa.yara, "compile",
-                        lambda filepaths: captured.update(filepaths) or object())
+    monkeypatch.setattr(ysa.yara, "compile", lambda filepaths: captured.update(filepaths) or object())
     ysa._RULES_CACHE.clear()
     _compile_rules(rules_dir, precompiled=False, recursive=True)
-    assert list(captured.keys()) == ["marker.yar"], (
-        f"namespaces must be run-relative, got {list(captured.keys())}")
+    assert list(captured.keys()) == ["marker.yar"], f"namespaces must be run-relative, got {list(captured.keys())}"
 
 
 def test_successful_match_publishes_summary_and_raw(analyzer, rules_dir, tmp_path):
@@ -124,7 +122,7 @@ def test_max_matches_cap_is_enforced(analyzer, tmp_path):
     rules_dir.mkdir()
     for i in range(5):
         (rules_dir / f"rule{i}.yar").write_text(
-            f"rule rule_{i} {{ strings: $m = \"statcheck-test-marker\" condition: $m }}"
+            f'rule rule_{i} {{ strings: $m = "statcheck-test-marker" condition: $m }}'
         )
     target = _target(tmp_path)
     results, run_dir = _run(analyzer, target, rules_dir, tmp_path, config={"max_matches": 2})

@@ -1,141 +1,168 @@
 # Statcheck
 
-Statcheck is a modular orchestrator designed to automate the metadata analysis of binaries using Python-based plugins. 
+Statcheck is a modular orchestrator that automates static analysis of binaries
+(PE, ELF, Mach-O) using Python plugins that wrap the external tools you
+already rely on.
 
-It supports chaining together custom analyzers and reporters, helping reduce manual intervention.
+It supports chaining custom analyzers and reporters through a DAG dependency
+system, reducing manual intervention. While built with malware analysis and
+reverse engineering in mind, the core engine can orchestrate any automated
+file-processing pipeline.
 
-While built with malware analysis and reverse engineering in mind, the core engine is adaptable and can be used to orchestrate various automated processing tasks.
+> **Security note:** statcheck performs *static* analysis only and never
+> executes the sample. Even so, always run it in an isolated VM/container and
+> never submit sensitive samples to third-party TI APIs. See
+> [docs/security.md](docs/security.md).
 
 ## Why Statcheck?
 
-Many existing analysis frameworks have specific, predefined workflows. Statcheck was built to offer a flexible alternative, allowing analysts to create custom pipelines using the external tools they already rely on.
-
-The advantages of this approach include:
-- **Familiar Tooling:** Choose the external analysis tools you prefer and chain them as needed.
-- **Efficiency:** Offload heavy processing to compiled utilities (like Capa, Detect It Easy, FLOSS) that are optimized for those tasks.
-- **Extensibility:** Integrate new tools for analysis or reporting by writing a standard Python wrapper.
-- **Custom Insights:** Use Python logic to parse and correlate raw outputs into metrics that are meaningful for your workflow.
-- **LLM-Ready Reporting:** Data is split into "Summary" (high signal-to-noise) and "Complete" (raw output) structures. This makes the reports easier for humans to read and highly efficient for AI context windows.
+- **Familiar tooling:** choose the external analysis tools you prefer (capa,
+  FLOSS, Detect It Easy, YARA, ...) and chain them as needed.
+- **Efficiency:** heavy lifting is offloaded to compiled utilities; Python
+  only parses and correlates their outputs.
+- **Extensibility:** integrate new tools or report formats by writing one
+  standard Python class.
+- **Custom insights:** parse and correlate raw outputs into metrics that are
+  meaningful for your workflow.
+- **LLM-ready reporting:** data is split into a high-signal `result_summary`
+  and per-plugin raw artifacts, keeping reports readable for humans and
+  efficient for AI context windows.
 
 ## Features
 
-- **Concurrent Execution:** Uses a Directed Acyclic Graph (DAG) dependency system to run independent analyzers in parallel, reducing overall analysis time.
-- **Format-Aware Routing:** Identifies file types (PE, ELF, Mach-O) using native Python header checks, dynamically loading only the plugins that support the submitted format.
-- **Manual Overrides:** Allows analysts to bypass automatic detection for obfuscated malware or memory dumps and define the format in the command line.
-- **External Configuration:** Manages external binary paths, tool toggles, and API keys via simple `tools_config.json` and `.env` files without requiring code modifications.
-- **Resilient Threat Intelligence:** Built-in integration with VirusTotal and MalwareBazaar, featuring automated rate-limiting, retry adapters, and error handling.
-- **Template-Based Reporting:** Presentation layers (like JSON output) are entirely decoupled from the analysis logic and configurable via `reporter_config.json`.
+- **Concurrent execution:** a DAG dependency system runs independent
+  analyzers in parallel (`all`/`any` dependency semantics).
+- **Format-aware routing:** PE/ELF/Mach-O detection via magic bytes (with
+  Java-class/fat-Mach-O disambiguation); only supporting plugins are loaded.
+- **Observability:** every run records per-plugin status
+  (`completed`/`failed`/`timeout`/`skipped_disabled`/`skipped_dependency`/
+  `unavailable`), durations, and run metadata.
+- **Bounded execution:** every external tool call has a timeout; extraction
+  and output sizes are capped through configurable limits.
+- **Deterministic output:** identical inputs produce byte-identical reports
+  (sorted collections everywhere, stable section ordering).
+- **Resilient threat intelligence:** VirusTotal and MalwareBazaar integrations
+  with retries, `Retry-After` handling, and an on-disk response cache.
+- **Decoupled reporting:** JSON and Markdown reporters, configurable through
+  `reporter_config.json`.
 
-## Installation & Setup
+## Installation & setup
 
-**1. Clone the repository**
+Requires Python 3.11+.
+
 ```bash
 git clone https://github.com/geekypanda411/statcheck.git
 cd statcheck
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"        # or: pip install -r requirements.txt
 ```
 
-**2. Install Python dependencies**
-```bash
-pip install -r requirements.txt
-```
+External tool binaries live in `bin/` (gitignored) and YARA rules in
+`yara_rules/` (also gitignored). Provision them manually or with
+`scripts/fetch-tools.sh` - see [bin/README.md](bin/README.md).
 
-**3. Configure your external tools and environment**
-Statcheck integrates with external binaries and APIs. Copy the example configuration file to set up your environment:
+Copy the example config and add API keys via `.env` (never commit them):
 
 ```bash
 cp tools_config.json.example tools_config.json
+printf 'MB_API_KEY=...\nVT_API_KEY=...\n' > .env
 ```
-
-Edit `tools_config.json` to point to your installed binaries, and securely add any required API keys to a `.env` file (e.g., `MB_API_KEY`, `VT_API_KEY`).
 
 ## Usage
 
-Statcheck is run via the command line.
-
-**Standard Auto-Detect Run:**
 ```bash
-python main.py malware_sample.exe --format auto --report json
+statcheck sample.exe                          # auto-detect format, JSON report
+statcheck dumped_payload.bin --format pe      # force a format (dumps, etc.)
+statcheck sample.bin --report json markdown   # multiple reporters
+statcheck sample.bin --report all             # every enabled reporter
+statcheck --list-plugins                      # show analyzers/reporters + tool availability
+statcheck sample.exe --workers 4 --timeout 120
 ```
 
-**Force a specific format (e.g., for memory dumps):**
-```bash
-python main.py dumped_payload.bin --format pe --report json
-```
+Useful flags: `--config`, `--reporter-config`, `--output-dir`, `--workers`,
+`--timeout`, `--debug`, `--log-file`, `--version`. Exit codes: `0` success,
+`1` runtime/analysis failure, `2` usage/config error, `130` interrupted.
 
-**Enable Debug Logging:**
-```bash
-python main.py malware_sample.exe --format auto --debug
-```
+Reports are written to `<output-dir>/<name>_<timestamp>/` and contain the
+summary report(s) plus one sub-directory of raw artifacts per plugin.
 
-## Writing a Plugin (Analyzers)
+## Writing a plugin (analyzer)
 
-To add a new tool to your pipeline, create a Python file in the `src/analyzers/` directory that inherits from `BaseAnalyzer`. The orchestrator will automatically discover it, check its dependencies, and execute it.
-
-### Example Plugin
+Create a Python file in `src/analyzers/` (or `src/analyzers/pe/` /
+`src/analyzers/elf/` for format-specific plugins) that inherits from
+`BaseAnalyzer`. The orchestrator discovers it automatically.
 
 ```python
-import subprocess
-from src.analyzers.base_analyzer import BaseAnalyzer
+import json
+from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, run_tool
+
 
 class CustomAnalyzer(BaseAnalyzer):
     name = "Custom Tool Analyzer"
     plugin_id = "custom_tool"
-    supported_formats = ['all']
-    
-    # Define plugins that must run before this one
-    depends = {"all":["<List of plugins that must be executed before your plugin>"],"any":["<List of plugins where at least one of these should be enabled and executed before your plugin>"]} 
+    supported_formats = ["all"]
+
+    # 'all': every listed plugin must run first.
+    # 'any': at least one listed plugin must be enabled; the analyzer waits
+    #        for all enabled ones to finish.
+    depends = {"all": [], "any": []}
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
-        # 1. Run your external tool
-        result = subprocess.run([tool_path, str(target_file.path)], capture_output=True, text=True)
-        
-        # 2. Parse the output into a clean summary
-        summary = {"status": "analyzed"}
-        
-        # Base Analyzer has a helper (get_plugin_dir) that generates a directory for the plugin calling it
-        plugin_dir = self.get_plugin_dir(run_dir)
-        # Name of your complete raw results, ideally <plugin id>_raw_output.<format>
-        raw_output_path = os.path.join(plugin_dir, "custom_tool_raw_output.json")
-        with open(raw_output_path, "w") as f:
-            json.dump(complete, f, indent=4)
-        # Linking raw tool output to the summary
-        summary["raw_output_path"] = raw_output_path
+        # 1. Resolve and run the external tool (with timeout)
+        executable = resolve_tool_path(tool_path)
+        if executable is None:
+            target_file.add_result(self.plugin_id, summary_data={"status": "unavailable", "reason": "tool not found"})
+            return
+        try:
+            result = run_tool([executable, str(target_file.path)], timeout=self.resolve_timeout(plugin_config))
+        except ToolError as e:
+            target_file.add_result(self.plugin_id, summary_data={"status": "unavailable", "reason": str(e)})
+            return
 
-        # 3. Save it back to the target file
+        # 2. Parse the output into a clean summary
+        summary = {"status": "analyzed", "findings": []}
+
+        # 3. Write raw output (run-dir-relative path is returned for you)
+        summary["raw_output_path"] = self.save_raw(run_dir, "custom_tool_raw_output.json", json.loads(result.stdout))
+
+        # 4. Publish the summary and optional inter-plugin context
         target_file.add_result(
-            self.plugin_id, 
-            summary_data=summary, 
-            internal_context_data={
-                "whatever_you_want_passed_to_other_plugins": generated_internal_context,
-            }
+            self.plugin_id,
+            summary_data=summary,
+            internal_context_data={"custom_input": [...]},
         )
 ```
 
-## Future Roadmap
+More details: [docs/plugin-api.md](docs/plugin-api.md),
+[docs/architecture.md](docs/architecture.md).
 
-**Core Engine & Architecture**
-- [x] **Environment Variables:** Integrate `.env` parsing to securely manage API keys.
-- [x] **Parallel Execution:** Upgrade the Orchestrator engine to run independent analyzers concurrently.
-- [ ] **Execution Templates:** Use JSON to define strict tool chaining and repeatable analysis templates.
+## Documentation
 
-**Analysis & Threat Intelligence**
-- [x] **Public TI APIs:** Automated querying against VirusTotal and MalwareBazaar.
-- [x] **String Extraction:** Add a FLOSS and QUANTUMSTRAND analyzer to extract and filter IOCs via regex.
-- [x] **Custom YARA:** Add support to trigger local scans using custom YARA rulesets.
-- [ ] **Prompt Injection strings Detection:** Add support to analyze extracted strings and identify potential prompt injection strings.
-- [ ] **OSINT Hash Search:** Automate Google querying to find existing sandbox reports or threat write-ups for a sample.
-- [ ] **Internal CTI Integration:** Add the ability to query internal intelligence platforms like MISP and OpenCTI.
-- [ ] **Dynamic Analysis (CAPEv2):** Automate submitting samples to a CAPEv2 instance and parsing the behavioral results.
+- [Configuration reference](docs/configuration.md)
+- [Architecture & DAG semantics](docs/architecture.md)
+- [Plugin API](docs/plugin-api.md)
+- [Report schema](docs/report-schema.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Security](docs/security.md)
+- [External tools](bin/README.md)
 
-**Reporting & Output**
-- [ ] **Human-Readable Reporters:** Implement Markdown and HTML reporters for shareable forensic reports.
-- [ ] **LLM Integration:** Feed the high-signal `result_summary` into an LLM for automated narrative threat assessments.
-- [ ] **STIX 2.1 Reporter:** Convert results to STIX 2.1 compliant output for automated ingestion by enterprise TI platforms.
+## Roadmap
+
+- [ ] Execution templates: strict tool chaining via JSON templates.
+- [ ] Prompt-injection string detection.
+- [ ] OSINT hash search for existing sandbox reports.
+- [ ] Internal CTI integrations (MISP, OpenCTI).
+- [ ] Dynamic analysis via CAPEv2 submission.
+- [ ] STIX 2.1 reporter.
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome. Feel free to check the [issues page](https://github.com/geekypanda411/statcheck/issues) if you would like to contribute.
+Contributions, issues, and feature requests are welcome - see
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[issues page](https://github.com/geekypanda411/statcheck/issues).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE)
+file for details.

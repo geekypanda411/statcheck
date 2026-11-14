@@ -30,8 +30,7 @@ def fake_cache(tmp_path, monkeypatch):
     cache_location.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(cache, "cache_dir", lambda: cache_location)
     # The analyzer imports the names directly; patch there too.
-    monkeypatch.setattr("src.analyzers.iocextractor_analyzer.cache_dir",
-                        lambda: cache_location)
+    monkeypatch.setattr("src.analyzers.iocextractor_analyzer.cache_dir", lambda: cache_location)
     return cache_location
 
 
@@ -39,7 +38,8 @@ def _patch_iana(monkeypatch, body=IANA_BODY, status=200):
     from src.analyzers import iocextractor_analyzer as ice
 
     monkeypatch.setattr(
-        ice.requests, "get",
+        ice.requests,
+        "get",
         lambda url, timeout: SimpleNamespace(status_code=status, text=body),
     )
 
@@ -76,13 +76,12 @@ def test_tld_list_reused_when_fresh(analyzer, fake_cache, monkeypatch, tmp_path)
 
     tld_file = tmp_path / "tlds.txt"
     tld_file.write_text("com\nnet\n")
-    (fake_cache / "tlds.meta.json").write_text(
-        '{"tldupdatedon": 9999999999, "tld_version": 1}'
-    )
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
 
     calls = []
     monkeypatch.setattr(
-        ice.requests, "get",
+        ice.requests,
+        "get",
         lambda url, timeout: calls.append(url) or SimpleNamespace(status_code=200, text=IANA_BODY),
     )
     tlds = analyzer._update_tld_list({"tld_file": str(tld_file)})
@@ -111,8 +110,7 @@ def _run_extract(analyzer, tmp_path, strings_by_source, config=None):
     plugin_config = {"tld_file": str(tmp_path / "fresh-tlds.txt")}
     if config:
         plugin_config.update(config)
-    analyzer.analyze(target, tool_path="", plugin_config=plugin_config,
-                     run_dir=str(tmp_path / "run"))
+    analyzer.analyze(target, tool_path="", plugin_config=plugin_config, run_dir=str(tmp_path / "run"))
     # Pre-seed the TLD list so no network is attempted.
     (tmp_path / "fresh-tlds.txt").write_text("com\nnet\norg\nevil\n")
     return target
@@ -123,14 +121,18 @@ def test_ioc_extraction_extracts_urls_ips_domains(analyzer, fake_cache, monkeypa
     (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
     _patch_iana(monkeypatch)  # belt & braces
 
-    target = _run_extract(analyzer, tmp_path, {
-        "floss": [
-            ("http://evil.example.com/payload.bin", []),
-            ("Visit malware.evil.com", []),
-            ("C2 at 185.220.101.5", []),
-            ("deadbeef", []),
-        ],
-    })
+    target = _run_extract(
+        analyzer,
+        tmp_path,
+        {
+            "floss": [
+                ("http://evil.example.com/payload.bin", []),
+                ("Visit malware.evil.com", []),
+                ("C2 at 185.220.101.5", []),
+                ("deadbeef", []),
+            ],
+        },
+    )
     summary = target.results["result_summary"]["iocextractor"]
     assert "http://evil.example.com/payload.bin" in summary["regex_urls"]
     assert "malware.evil.com" in summary["regex_domains"]
@@ -139,16 +141,21 @@ def test_ioc_extraction_extracts_urls_ips_domains(analyzer, fake_cache, monkeypa
 
 def test_ioc_extraction_ignores_tagged_strings(analyzer, fake_cache, monkeypatch, tmp_path):
     (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
-    target = _run_extract(analyzer, tmp_path, {
-        "floss": [
-            ("http://good.example.com/winapi-thing", ["#winapi"]),
-        ],
-    })
+    target = _run_extract(
+        analyzer,
+        tmp_path,
+        {
+            "floss": [
+                ("http://good.example.com/winapi-thing", ["#winapi"]),
+            ],
+        },
+    )
     # #winapi-tagged strings are excluded by default ignore_tags.
     assert "iocextractor" not in target.results["result_summary"]
 
 
 # ---------------------------------------------- Phase 5.5 behavior coverage
+
 
 def _extract_strings(analyzer, fake_cache, tmp_path, strings, config=None):
     (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
@@ -157,30 +164,43 @@ def _extract_strings(analyzer, fake_cache, tmp_path, strings, config=None):
 
 
 def test_domain_followed_by_punctuation_is_extracted(analyzer, fake_cache, monkeypatch, tmp_path):
-    summary = _extract_strings(analyzer, fake_cache, tmp_path, [
-        "beacon from c2.evil.com, then sleep",
-        "backup host c2backup.evil.com); done",
-    ])
+    summary = _extract_strings(
+        analyzer,
+        fake_cache,
+        tmp_path,
+        [
+            "beacon from c2.evil.com, then sleep",
+            "backup host c2backup.evil.com); done",
+        ],
+    )
     assert "c2.evil.com" in summary["regex_domains"]
     assert "c2backup.evil.com" in summary["regex_domains"]
 
 
 def test_known_false_positives_are_not_iocs(analyzer, fake_cache, monkeypatch, tmp_path):
-    summary = _extract_strings(analyzer, fake_cache, tmp_path, [
-        "dead:beef",
-        "/opt/tools/file.zip",
-        "0.0.0",
-    ])
+    summary = _extract_strings(
+        analyzer,
+        fake_cache,
+        tmp_path,
+        [
+            "dead:beef",
+            "/opt/tools/file.zip",
+            "0.0.0",
+        ],
+    )
     assert summary.get("regex_ip") is None, f"dead:beef/0.0.0 must not be IPs: {summary.get('regex_ip')}"
     assert summary.get("regex_domains") is None, (
-        f"path-embedded file.zip must not be a domain: {summary.get('regex_domains')}")
+        f"path-embedded file.zip must not be a domain: {summary.get('regex_domains')}"
+    )
     # The unix path is extracted instead.
     assert "/opt/tools/file.zip" in summary["regex_unixfilepath"]
 
 
 def test_exclude_private_ips_option(analyzer, fake_cache, monkeypatch, tmp_path):
     summary = _extract_strings(
-        analyzer, fake_cache, tmp_path,
+        analyzer,
+        fake_cache,
+        tmp_path,
         ["dial 185.220.101.5 or 127.0.0.1 or 192.168.1.10, ok"],
         config={"exclude_private_ips": True},
     )
@@ -192,7 +212,9 @@ def test_exclude_private_ips_option(analyzer, fake_cache, monkeypatch, tmp_path)
 
 def test_exclude_private_ips_off_by_default(analyzer, fake_cache, monkeypatch, tmp_path):
     summary = _extract_strings(
-        analyzer, fake_cache, tmp_path,
+        analyzer,
+        fake_cache,
+        tmp_path,
         ["dial 127.0.0.1 and 10.0.0.5, ok"],
     )
     assert "127.0.0.1" in summary["regex_ip"]
@@ -201,7 +223,9 @@ def test_exclude_private_ips_off_by_default(analyzer, fake_cache, monkeypatch, t
 
 def test_defang_option(analyzer, fake_cache, monkeypatch, tmp_path):
     summary = _extract_strings(
-        analyzer, fake_cache, tmp_path,
+        analyzer,
+        fake_cache,
+        tmp_path,
         ["visit http://evil.example.com/payload now"],
         config={"defang": True},
     )

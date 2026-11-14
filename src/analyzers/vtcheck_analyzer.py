@@ -9,9 +9,10 @@ from src.core.http import cached_response
 
 logger = logging.getLogger(__name__)
 
+
 class VirusTotalAnalyzer(BaseAnalyzer):
     name = "VirusTotal TI Lookup"
-    supported_formats = ['all']
+    supported_formats = ["all"]
     plugin_id = "vtlookup"
     depends = {"all": ["fileinfo"], "any": []}
 
@@ -31,7 +32,6 @@ class VirusTotalAnalyzer(BaseAnalyzer):
         # Initialize the official VT client
         try:
             with vt.Client(api_key) as client:
-                
                 # --- 1. EXACT HASH LOOKUP (cached on disk to spare quota) ---
                 if plugin_config.get("lookup_exact_hash", True):
                     sha256 = summary.get("fileinfo", {}).get("File_SHA256")
@@ -66,7 +66,8 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                             }
 
                         cached, _from_cache = cached_response(
-                            "vt", f"files:{sha256}", fetch_vt_exact, ttl_seconds=cache_ttl)
+                            "vt", f"files:{sha256}", fetch_vt_exact, ttl_seconds=cache_ttl
+                        )
 
                         if cached and cached.get("not_found"):
                             vt_summary["exact_match"] = "File not found on VirusTotal."
@@ -78,8 +79,11 @@ class VirusTotalAnalyzer(BaseAnalyzer):
 
                         # --- 1b. RELATIONS (always fetched live: paginated
                         # and premium-gated, not worth caching) ---
-                        if cached and not cached.get("not_found") \
-                                and plugin_config.get("fetch_relations_behaviour", False):
+                        if (
+                            cached
+                            and not cached.get("not_found")
+                            and plugin_config.get("fetch_relations_behaviour", False)
+                        ):
                             logger.info("fetch_relations_behaviour is true; fetching relations.")
                             relations_api_endpoints = {
                                 "contacted_ips": "Contacted IPs",
@@ -87,7 +91,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                                 "dropped_files": "Dropped Files",
                                 "bundled_files": "Bundled Files",
                                 "execution_parents": "Execution Parents",
-                                "itw_urls": "In-The-Wild URLs"
+                                "itw_urls": "In-The-Wild URLs",
                             }
 
                             vt_summary["relations"] = {}
@@ -106,7 +110,8 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                                     max_items = plugin_config.get("relations_result_limit", 40)
                                     logger.debug(f"Maximum {max_items} items for {human_name} (configurable).")
                                     response_it = client.iterator(
-                                        f'/files/{sha256}/{endpoint}', limit=max_items, batch_size=max_items)
+                                        f"/files/{sha256}/{endpoint}", limit=max_items, batch_size=max_items
+                                    )
 
                                     relations_raw_list = []
                                     relations_summary_list = []
@@ -122,7 +127,8 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                                     if relations_raw_list:
                                         vt_complete["relations_raw"][endpoint] = relations_raw_list
                                         vt_summary["relations"][endpoint] = sorted(
-                                            str(x) for x in relations_summary_list)
+                                            str(x) for x in relations_summary_list
+                                        )
 
                                 except vt.error.APIError as e:
                                     if e.code == "ForbiddenError":
@@ -139,7 +145,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                     if ssdeep:
                         logger.info("Querying VT for SSDeep similarity...")
                         fuzzy_matches = []
-                        
+
                         try:
                             # client.iterator handles API pagination!
                             # limit to 5 so we don't accidentally burn API quota on a massive search
@@ -152,13 +158,15 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                                 params={"query": query},
                                 limit=max_fuzzy_lookups,
                             )
-                            
+
                             for related_file in fuzzylookup_it:
-                                fuzzy_matches.append({
-                                    "sha256": related_file.id,
-                                    "malicious_votes": related_file.last_analysis_stats.get("malicious", 0)
-                                })
-                            
+                                fuzzy_matches.append(
+                                    {
+                                        "sha256": related_file.id,
+                                        "malicious_votes": related_file.last_analysis_stats.get("malicious", 0),
+                                    }
+                                )
+
                             vt_summary["fuzzy_matches"] = fuzzy_matches if fuzzy_matches else "No similar files found."
                         except vt.error.APIError as e:
                             logger.error(f"VT Fuzzy Hash Error: {e}")
@@ -174,7 +182,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
             logger.info("Successfully added VirusTotal intelligence to the raw output file.")
         else:
             logger.warning("Complete raw result for VirusTotal analyzer not available.")
-        
+
         if vt_summary:
             target_file.add_result(self.plugin_id, summary_data=vt_summary)
             logger.info("Successfully added VirusTotal intelligence to report.")

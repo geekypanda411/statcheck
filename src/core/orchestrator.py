@@ -18,6 +18,7 @@ from src.reporters.base_reporter import BaseReporter
 
 logger = logging.getLogger(__name__)
 
+
 class Orchestrator:
     def __init__(
         self,
@@ -49,9 +50,7 @@ class Orchestrator:
         # bin_path is resolved relative to the config file's directory so a
         # config with "./bin" means "bin next to the config", not "bin next
         # to wherever the user happened to invoke statcheck".
-        self.bin_dir = resolve_path(
-            self.config.get("bin_path", "./bin"), base=self.config_path.resolve().parent
-        )
+        self.bin_dir = resolve_path(self.config.get("bin_path", "./bin"), base=self.config_path.resolve().parent)
 
     def _load_tool_config(self, config_path: str) -> dict:
         # Consumers read config["plugins"], so the fallback must use that
@@ -76,9 +75,9 @@ class Orchestrator:
             return default
 
     def _import_plugin_files(self, file_paths: list):
-        if not hasattr(self, '_loaded_modules'):
+        if not hasattr(self, "_loaded_modules"):
             self._loaded_modules = []
-        if not hasattr(self, '_imported_module_names'):
+        if not hasattr(self, "_imported_module_names"):
             # Guard against re-importing the same plugin file, which would
             # create duplicate class objects and duplicate registrations.
             self._imported_module_names = set()
@@ -166,7 +165,7 @@ class Orchestrator:
         for analyzer_class in self._iter_plugin_subclasses(BaseAnalyzer, "plugin_id"):
             analyzer = analyzer_class()
             formats = analyzer.supported_formats
-            if 'all' in formats or self.file_format in formats:
+            if "all" in formats or self.file_format in formats:
                 self.analyzers.append(analyzer)
                 logger.debug(f"Analyzer loaded: {analyzer.name}")
             else:
@@ -206,7 +205,7 @@ class Orchestrator:
         self.reporters = []
         for reporter_class in self._iter_plugin_subclasses(BaseReporter, "reporter_id"):
             reporter = reporter_class()
-            if 'all' in desired_reporter or reporter.format_id in desired_reporter:
+            if "all" in desired_reporter or reporter.format_id in desired_reporter:
                 self.reporters.append(reporter)
                 logger.debug(f"Reporter loaded: {reporter.name} (format: {reporter.format_id})")
             else:
@@ -219,37 +218,35 @@ class Orchestrator:
         Used by ``--list-plugins``; independent of the target file format.
         """
         analyzer_dir = PROJECT_ROOT / "src" / "analyzers"
-        analyzer_files = [
-            p for p in analyzer_dir.rglob("*.py")
-            if p.name not in ("__init__.py", "base_analyzer.py")
-        ]
+        analyzer_files = [p for p in analyzer_dir.rglob("*.py") if p.name not in ("__init__.py", "base_analyzer.py")]
         self._import_plugin_files(analyzer_files)
 
         analyzers = []
         for cls in self._iter_plugin_subclasses(BaseAnalyzer, "plugin_id"):
             analyzer = cls()
-            analyzers.append({
-                "plugin_id": analyzer.plugin_id,
-                "name": analyzer.name,
-                "supported_formats": list(analyzer.supported_formats),
-                "depends": analyzer.depends,
-            })
+            analyzers.append(
+                {
+                    "plugin_id": analyzer.plugin_id,
+                    "name": analyzer.name,
+                    "supported_formats": list(analyzer.supported_formats),
+                    "depends": analyzer.depends,
+                }
+            )
 
         reporter_dir = PROJECT_ROOT / "src" / "reporters"
-        reporter_files = [
-            p for p in reporter_dir.glob("*.py")
-            if p.name not in ("__init__.py", "base_reporter.py")
-        ]
+        reporter_files = [p for p in reporter_dir.glob("*.py") if p.name not in ("__init__.py", "base_reporter.py")]
         self._import_plugin_files(reporter_files)
 
         reporters = []
         for cls in self._iter_plugin_subclasses(BaseReporter, "reporter_id"):
             reporter = cls()
-            reporters.append({
-                "reporter_id": reporter.reporter_id,
-                "name": reporter.name,
-                "format_id": reporter.format_id,
-            })
+            reporters.append(
+                {
+                    "reporter_id": reporter.reporter_id,
+                    "name": reporter.name,
+                    "format_id": reporter.format_id,
+                }
+            )
 
         return {
             "analyzers": sorted(analyzers, key=lambda a: str(a["plugin_id"])),
@@ -272,7 +269,7 @@ class Orchestrator:
 
         # --- Create Unified Run Directory ---
         self.timestamp = int(run_started_at)
-        clean_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', self.target_file.filename)
+        clean_name = re.sub(r"[^a-zA-Z0-9.-]+", "_", self.target_file.filename)
         self.run_dir = os.path.join(report_dir, f"{clean_name}_{self.timestamp}")
         os.makedirs(self.run_dir, exist_ok=True)
         logger.info(f"Created Unified Run Directory: {self.run_dir}")
@@ -295,7 +292,7 @@ class Orchestrator:
             limits=self.config.get("limits", {}),
         )
 
-        #Identify plugins set as active in config
+        # Identify plugins set as active in config
         active_plugin_ids = set()
         for analyzer in self.analyzers:
             plugin_config = self.config.get("plugins", {}).get(analyzer.plugin_id, {})
@@ -305,27 +302,26 @@ class Orchestrator:
                 logger.info(f"Analyzer Disabled by Config: {analyzer.name}")
                 self.target_file.set_plugin_status(analyzer.plugin_id, "skipped_disabled")
 
-        #Handle cascading scenarios where plugin c depends on plugin b which depends on plugin a
-        #And plugin a being disabled essentially should prevent execution of plugin b and by extension plugin c
+        # Handle cascading scenarios where plugin c depends on plugin b which depends on plugin a
+        # And plugin a being disabled essentially should prevent execution of plugin b and by extension plugin c
         while True:
             removed_any = False
             for analyzer in self.analyzers:
                 if analyzer.plugin_id in active_plugin_ids:
-                    
                     deps = analyzer.depends
                     all_deps = deps.get("all", [])
                     any_deps = deps.get("any", [])
-                    
+
                     # Check 'all' logic: strict dependencies
                     missing_all = [dep for dep in all_deps if dep not in active_plugin_ids]
-                    
+
                     # B. Check 'any' logic: If 'any' is defined, at least one should be active
                     missing_any = False
                     if any_deps:
                         has_active_any = any(dep in active_plugin_ids for dep in any_deps)
                         if not has_active_any:
                             missing_any = True
-                            
+
                     if missing_all or missing_any:
                         if missing_all:
                             reason = f"Missing 'all' deps: {missing_all}."
@@ -333,14 +329,14 @@ class Orchestrator:
                             reason = f"None of 'any' deps enabled: {any_deps}."
                         logger.warning(f"Cascading Skip: '{analyzer.name}' will not run. {reason}")
                         self.target_file.set_plugin_status(analyzer.plugin_id, "skipped_dependency", error=reason)
-                        
+
                         active_plugin_ids.remove(analyzer.plugin_id)
                         removed_any = True
-            
+
             # If we made it through the whole list without removing anything, the graph is stable!
             if not removed_any:
                 break
-        
+
         pending_analyzers = [a for a in self.analyzers if a.plugin_id in active_plugin_ids]
 
         if not pending_analyzers:
@@ -363,13 +359,10 @@ class Orchestrator:
         # NOTE: shutdown uses cancel_futures so a Ctrl-C (or an exception in
         # the scheduler loop) does not block on queued-but-unstarted work.
         # Subprocesses already running are bounded by the per-tool timeout.
-        executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.workers, thread_name_prefix="Worker"
-        )
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="Worker")
         try:
             # Keep looping as long as there is work to do or threads currently running
             while pending_analyzers or running_futures:
-                
                 # 1. Find plugins that are ready to run
                 ready_to_run = []
                 for analyzer in pending_analyzers:
@@ -377,15 +370,15 @@ class Orchestrator:
                     deps = analyzer.depends
                     all_deps = deps.get("all", [])
                     any_deps = deps.get("any", [])
-                    
+
                     # Hard dependencies ('all') must have finished
                     all_deps_met = all(dep in completed_plugins for dep in all_deps)
-                    
+
                     # Aggregate dependencies ('any')
                     # dynamically filter the list to ONLY look at the ones that survived the pruning phase
                     active_any_deps = [dep for dep in any_deps if dep in active_plugin_ids]
                     any_deps_met = all(dep in completed_plugins for dep in active_any_deps)
-                    
+
                     # Only append if BOTH dependency sets are perfectly satisfied
                     if all_deps_met and any_deps_met:
                         ready_to_run.append(analyzer)
@@ -393,7 +386,7 @@ class Orchestrator:
                 # 2. Schedule the ready plugins
                 for analyzer in ready_to_run:
                     pending_analyzers.remove(analyzer)
-                    
+
                     plugin_config = self.config.get("plugins", {}).get(analyzer.plugin_id, {})
 
                     logger.debug(f"Scheduling analyzer: {analyzer.name}")
@@ -410,14 +403,15 @@ class Orchestrator:
                     running_futures[future] = analyzer
 
                 # 3. Deadlock Protection
-                # If nothing is running, and there are still pending plugins, it means a 
+                # If nothing is running, and there are still pending plugins, it means a
                 # dependency is missing (e.g., waiting on a plugin_id that doesn't exist)
                 if not running_futures and pending_analyzers:
                     stuck = [a.plugin_id for a in pending_analyzers]
                     logger.error(f"Deadlock detected! Unmet dependencies for: {stuck}")
                     for analyzer in pending_analyzers:
                         self.target_file.set_plugin_status(
-                            analyzer.plugin_id, "skipped_dependency",
+                            analyzer.plugin_id,
+                            "skipped_dependency",
                             error="Deadlock: unmet dependencies",
                         )
                     pending_analyzers = []
@@ -427,8 +421,7 @@ class Orchestrator:
                 if running_futures:
                     # The Orchestrator sleeps here until any thread finishes
                     done, _ = concurrent.futures.wait(
-                        running_futures.keys(), 
-                        return_when=concurrent.futures.FIRST_COMPLETED
+                        running_futures.keys(), return_when=concurrent.futures.FIRST_COMPLETED
                     )
 
                     # Process the ones that just finished
@@ -440,22 +433,24 @@ class Orchestrator:
                             # Calling .result() raises any exceptions that happened inside the thread
                             future.result()
                             logger.info(f"Completed: {analyzer.name}")
-                            self.target_file.set_plugin_status(
-                                analyzer.plugin_id, "completed", duration_ms=duration_ms
-                            )
+                            self.target_file.set_plugin_status(analyzer.plugin_id, "completed", duration_ms=duration_ms)
                         except ToolTimeout as e:
                             logger.warning(f"Analyzer '{analyzer.name}' timed out: {e}")
                             self.target_file.set_plugin_status(
-                                analyzer.plugin_id, "timeout",
-                                error=repr(e), duration_ms=duration_ms,
+                                analyzer.plugin_id,
+                                "timeout",
+                                error=repr(e),
+                                duration_ms=duration_ms,
                             )
                         except Exception as e:
                             logger.exception(f"Analyzer '{analyzer.name}' crashed!")
                             self.target_file.set_plugin_status(
-                                analyzer.plugin_id, "failed",
-                                error=self._format_exception(e), duration_ms=duration_ms,
+                                analyzer.plugin_id,
+                                "failed",
+                                error=self._format_exception(e),
+                                duration_ms=duration_ms,
                             )
-                        
+
                         # Even if it crashed, we mark it completed so the pipeline doesn't freeze.
                         # Downstream plugins will run, gracefully realize data is missing, and exit.
                         completed_plugins.add(analyzer.plugin_id)
@@ -473,7 +468,6 @@ class Orchestrator:
 
         # 2. Generate Reports
         for reporter in self.reporters:
-
             rep_config = self.reporter_config.get("reporters", {}).get(reporter.reporter_id, {})
 
             if rep_config.get("enabled", True) is False:

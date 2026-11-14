@@ -16,6 +16,7 @@ from src.core.target_file import TargetFile
 
 # ---------------------------------------------------------------- MalwareBazaar
 
+
 @pytest.fixture()
 def mb_target(tmp_path):
     target = TargetFile(str(tmp_path / "sample.bin"), "pe")
@@ -77,15 +78,17 @@ def test_mb_empty_data_response_is_guarded(monkeypatch, tmp_path, mb_target, fak
 def test_mb_valid_exact_match(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     payload = {
         "query_status": "ok",
-        "data": [{
-            "signature": "Stealer",
-            "tags": ["z", "a"],
-            "delivery_method": "email_attachment",
-            "file_type": "exe",
-            "vendor_intel": {"any.run": {}, "intezer": {}},
-            "first_seen": "2026-01-01",
-            "yara_rules": ["rule_x"],
-        }],
+        "data": [
+            {
+                "signature": "Stealer",
+                "tags": ["z", "a"],
+                "delivery_method": "email_attachment",
+                "file_type": "exe",
+                "vendor_intel": {"any.run": {}, "intezer": {}},
+                "first_seen": "2026-01-01",
+                "yara_rules": ["rule_x"],
+            }
+        ],
     }
     target, session = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)])
     summary = target.results["result_summary"]["malwarebazaar"]
@@ -123,7 +126,10 @@ def test_mb_exact_lookup_is_cached_on_disk(monkeypatch, tmp_path, mb_target, fak
 def test_mb_base_url_is_configurable(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     payload = {"query_status": "hash_not_found"}
     target, session = _run_mb(
-        monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)],
+        monkeypatch,
+        tmp_path,
+        mb_target,
+        [FakeResponse(200, payload)],
         config={"base_url": "http://127.0.0.1:1/api/"},
     )
     assert session.calls[0]["url"] == "http://127.0.0.1:1/api/"
@@ -137,6 +143,7 @@ def test_mb_missing_api_key_publishes_nothing(monkeypatch, tmp_path, mb_target):
 
 
 # ---------------------------------------------------------------- VirusTotal
+
 
 class FakeAPIError(Exception):
     def __init__(self, code=None):
@@ -213,15 +220,17 @@ def _run_vt(monkeypatch, tmp_path, vt_target, client, config=None):
 
 
 def test_vt_exact_match_summary(monkeypatch, tmp_path, vt_target):
-    file_obj = FakeVTObject({
-        "meaningful_name": "evil.exe",
-        "reputation": -5,
-        "authentihash": "ef" * 32,
-        "first_submission_date": 1700000000,
-        "last_analysis_stats": {"malicious": 42},
-        "signature_info": {"verified": "no"},
-        "crowdsourced_yara_results": [{"rule_name": "x"}],
-    })
+    file_obj = FakeVTObject(
+        {
+            "meaningful_name": "evil.exe",
+            "reputation": -5,
+            "authentihash": "ef" * 32,
+            "first_submission_date": 1700000000,
+            "last_analysis_stats": {"malicious": 42},
+            "signature_info": {"verified": "no"},
+            "crowdsourced_yara_results": [{"rule_name": "x"}],
+        }
+    )
     client = FakeVTClient(file_obj=file_obj)
     target, sleep_log = _run_vt(monkeypatch, tmp_path, vt_target, client)
 
@@ -266,8 +275,10 @@ def test_vt_fuzzy_query_is_passed_as_param(monkeypatch, tmp_path, vt_target):
 
 def test_vt_missing_api_key_publishes_nothing(monkeypatch, tmp_path, vt_target):
     monkeypatch.delenv("VT_API_KEY", raising=False)
-    monkeypatch.setattr("src.analyzers.vtcheck_analyzer.vt",
-                        SimpleNamespace(Client=lambda key: None, error=SimpleNamespace(APIError=FakeAPIError)))
+    monkeypatch.setattr(
+        "src.analyzers.vtcheck_analyzer.vt",
+        SimpleNamespace(Client=lambda key: None, error=SimpleNamespace(APIError=FakeAPIError)),
+    )
     analyzer = VirusTotalAnalyzer()
     analyzer.analyze(vt_target, tool_path="", plugin_config={}, run_dir=str(tmp_path / "run"))
     assert "vtlookup" not in vt_target.results["result_summary"]

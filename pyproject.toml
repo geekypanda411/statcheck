@@ -1,10 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "statcheck"
-version = "0.1"
-dependencies = []
+version = "0.2.0"
+description = "Plugin-driven static analysis pipeline for PE/ELF/Mach-O files"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "lief>=1.0.0",
+    "pefile>=2024.8.26",
+    "ppdeep>=20260221",
+    "py-tlsh>=5.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "vt-py>=0.20.0",
+    "yara-python>=4.3.0",
+]
 
-# Full packaging metadata lands in Phase 7; for now only the dev/test tool
-# configuration below is authoritative.
+[project.optional-dependencies]
+# Optional hash wheels that sometimes fail to build on constrained CI
+# runners are NOT in `dev` so the default gate stays installable.
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "types-requests",
+    "responses",
+]
+
+[project.scripts]
+statcheck = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+packages = [
+    "src",
+    "src.core",
+    "src.analyzers",
+    "src.analyzers.pe",
+    "src.analyzers.elf",
+    "src.reporters",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

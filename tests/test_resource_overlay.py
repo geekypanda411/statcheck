@@ -30,9 +30,7 @@ def _res_entry(type_id, id_, lang_id, offset, data):
                         entries=[
                             SimpleNamespace(
                                 struct=SimpleNamespace(Id=lang_id),
-                                data=SimpleNamespace(
-                                    struct=SimpleNamespace(OffsetToData=offset, Size=len(data))
-                                ),
+                                data=SimpleNamespace(struct=SimpleNamespace(OffsetToData=offset, Size=len(data))),
                             )
                         ]
                     ),
@@ -83,7 +81,7 @@ def _run_pe(analyzer, tmp_path, monkeypatch, entries, image, overlay=None, confi
 
 def test_summary_contains_relative_raw_path_and_raw_has_resources(analyzer, tmp_path, monkeypatch):
     image = b"A" * 4096
-    entries = [_res_entry(10, 1, 1033, 100, image[100:100 + 64])]
+    entries = [_res_entry(10, 1, 1033, 100, image[100 : 100 + 64])]
     target, run_dir = _run_pe(analyzer, tmp_path, monkeypatch, entries, image)
 
     summary = target.results["result_summary"]["resource_overlay"]

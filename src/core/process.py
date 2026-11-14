@@ -23,8 +23,7 @@ class ToolTimeout(ToolError):
     """External tool exceeded its timeout."""
 
 
-def run_tool(cmd: list[str], *, timeout: float, cwd=None, env=None,
-             check: bool = True) -> subprocess.CompletedProcess:
+def run_tool(cmd: list[str], *, timeout: float, cwd=None, env=None, check: bool = True) -> subprocess.CompletedProcess:
     """Run an external tool with a hard timeout.
 
     Raises ToolTimeout when the tool exceeds ``timeout`` seconds and ToolError
@@ -34,8 +33,13 @@ def run_tool(cmd: list[str], *, timeout: float, cwd=None, env=None,
     logger.debug(f"Running tool: {tool_name} (timeout: {timeout}s)")
     try:
         result = subprocess.run(
-            cmd, cwd=cwd, env=env, timeout=timeout,
-            text=True, capture_output=True, check=False,
+            cmd,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            text=True,
+            capture_output=True,
+            check=False,
         )
     except subprocess.TimeoutExpired as e:
         logger.warning(f"Tool '{tool_name}' timed out after {timeout}s.")

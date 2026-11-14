@@ -22,7 +22,7 @@ def _get_version() -> str:
 
         return version("statcheck")
     except PackageNotFoundError:
-        return "0.1.0"
+        return "0.2.0"
 
 
 def setup_logging(is_debug: bool, log_file: str):
@@ -38,32 +38,36 @@ def setup_logging(is_debug: bool, log_file: str):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="statcheck - Static File Metadata Analyzer")
-    parser.add_argument("file", nargs="?", default=None,
-                        help="Path to the file to analyze (omit with --list-plugins)")
-    parser.add_argument("--format",
-                        default="auto",
-                        choices=['auto', 'pe', 'elf', 'macho'],
-                        help="Target file format, or 'auto' to detect automatically (default: auto)")
+    parser.add_argument("file", nargs="?", default=None, help="Path to the file to analyze (omit with --list-plugins)")
+    parser.add_argument(
+        "--format",
+        default="auto",
+        choices=["auto", "pe", "elf", "macho"],
+        help="Target file format, or 'auto' to detect automatically (default: auto)",
+    )
 
     # Allow users to specify multiple report formats (e.g., --report json pdf),
     # or 'all' to generate every enabled report format.
-    parser.add_argument("--report", nargs='+', default=['json'],
-                        help="Report format(s) to generate (e.g., json, markdown, or 'all')")
-    parser.add_argument("--config", default=str(PROJECT_ROOT / "tools_config.json"),
-                        help="Path to the tools config JSON")
-    parser.add_argument("--reporter-config", default=str(PROJECT_ROOT / "reporter_config.json"),
-                        help="Path to the reporter config JSON")
-    parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "reports"),
-                        help="Directory where run outputs are written")
-    parser.add_argument("--workers", type=int, default=10,
-                        help="Number of analyzers to run in parallel (default: 10)")
-    parser.add_argument("--timeout", type=float, default=300.0,
-                        help="Default per-tool subprocess timeout in seconds (default: 300)")
+    parser.add_argument(
+        "--report", nargs="+", default=["json"], help="Report format(s) to generate (e.g., json, markdown, or 'all')"
+    )
+    parser.add_argument(
+        "--config", default=str(PROJECT_ROOT / "tools_config.json"), help="Path to the tools config JSON"
+    )
+    parser.add_argument(
+        "--reporter-config", default=str(PROJECT_ROOT / "reporter_config.json"), help="Path to the reporter config JSON"
+    )
+    parser.add_argument(
+        "--output-dir", default=str(PROJECT_ROOT / "reports"), help="Directory where run outputs are written"
+    )
+    parser.add_argument("--workers", type=int, default=10, help="Number of analyzers to run in parallel (default: 10)")
+    parser.add_argument(
+        "--timeout", type=float, default=300.0, help="Default per-tool subprocess timeout in seconds (default: 300)"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("--log-file", type=str, help="Save logs to a specific file instead of printing to screen")
     parser.add_argument("--version", action="version", version=f"statcheck {_get_version()}")
-    parser.add_argument("--list-plugins", action="store_true",
-                        help="List all discovered analyzers/reporters and exit")
+    parser.add_argument("--list-plugins", action="store_true", help="List all discovered analyzers/reporters and exit")
     return parser
 
 
@@ -78,6 +82,19 @@ def _run(args, logger) -> int:
         print("Discovered reporters:")
         for r in plugins["reporters"]:
             print(f"  {r['reporter_id']:<20} {r['format_id']:<10} {r['name']}")
+        # Tool availability: warn early when configured external tools are missing.
+        configured = app.config.get("plugins", {})
+        if configured:
+            from src.analyzers.base_analyzer import resolve_tool_path
+
+            print("External tool availability:")
+            for plugin_id, plugin_config in sorted(configured.items()):
+                tool = plugin_config.get("tool")
+                if tool is None or not isinstance(tool, str):
+                    continue
+                resolved = resolve_tool_path(str(app.bin_dir / tool))
+                status = "OK" if resolved else "MISSING"
+                print(f"  {plugin_id:<20} {status:<8} tool: {tool}")
         return 0
 
     if not args.file:
@@ -88,7 +105,7 @@ def _run(args, logger) -> int:
         logger.error(f"File not found: {args.file}")
         return 1
 
-    if args.format == 'auto':
+    if args.format == "auto":
         logger.info(f"Initiating format auto detection for file: {args.file}")
         final_format = detect_format(args.file)
 

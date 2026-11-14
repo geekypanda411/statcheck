@@ -27,8 +27,7 @@ DEFAULT_USER_AGENT = "Statcheck/0.2 (static analyzer)"
 DEFAULT_TTL_SECONDS = 24 * 3600
 
 
-def build_session(retries: int = 3, backoff: float = 2.0,
-                  user_agent: str = DEFAULT_USER_AGENT) -> requests.Session:
+def build_session(retries: int = 3, backoff: float = 2.0, user_agent: str = DEFAULT_USER_AGENT) -> requests.Session:
     """Session with automatic retries for 429/5xx (honors Retry-After)."""
     session = requests.Session()
     retry_strategy = Retry(
@@ -45,8 +44,7 @@ def build_session(retries: int = 3, backoff: float = 2.0,
     return session
 
 
-def cached_response(provider: str, key: str, fetch: Callable[[], object],
-                    ttl_seconds: int = DEFAULT_TTL_SECONDS):
+def cached_response(provider: str, key: str, fetch: Callable[[], object], ttl_seconds: int = DEFAULT_TTL_SECONDS):
     """Disk-backed response cache for a TI provider.
 
     Returns ``(data, from_cache)``. ``data`` may be ``None`` when the fetch

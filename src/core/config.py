@@ -43,16 +43,13 @@ def validate_tool_config(config: dict) -> list[str]:
             _check_is_dict(plugin_config, f"plugins.{plugin_id}")
             enabled = plugin_config.get("enabled")
             if enabled is not None and not isinstance(enabled, bool):
-                raise ConfigError(f"plugins.{plugin_id}.enabled must be a boolean, "
-                                  f"got {type(enabled).__name__}")
+                raise ConfigError(f"plugins.{plugin_id}.enabled must be a boolean, got {type(enabled).__name__}")
             tool = plugin_config.get("tool")
             if tool is not None and not isinstance(tool, str):
-                raise ConfigError(f"plugins.{plugin_id}.tool must be a string, "
-                                  f"got {type(tool).__name__}")
+                raise ConfigError(f"plugins.{plugin_id}.tool must be a string, got {type(tool).__name__}")
             timeout = plugin_config.get("timeout")
             if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
-                raise ConfigError(f"plugins.{plugin_id}.timeout must be a number, "
-                                  f"got {type(timeout).__name__}")
+                raise ConfigError(f"plugins.{plugin_id}.timeout must be a number, got {type(timeout).__name__}")
 
     limits = config.get("limits")
     if limits is not None:
@@ -82,12 +79,10 @@ def validate_reporter_config(config: dict) -> list[str]:
             _check_is_dict(reporter_config, f"reporters.{reporter_id}")
             enabled = reporter_config.get("enabled")
             if enabled is not None and not isinstance(enabled, bool):
-                raise ConfigError(f"reporters.{reporter_id}.enabled must be a boolean, "
-                                  f"got {type(enabled).__name__}")
+                raise ConfigError(f"reporters.{reporter_id}.enabled must be a boolean, got {type(enabled).__name__}")
             template = reporter_config.get("output_template")
             bad_template = not isinstance(template, list) or not all(isinstance(i, str) for i in template)
             if template is not None and bad_template:
-                raise ConfigError(f"reporters.{reporter_id}.output_template must be "
-                                  f"a list of strings")
+                raise ConfigError(f"reporters.{reporter_id}.output_template must be a list of strings")
 
     return warnings

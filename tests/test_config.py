@@ -46,6 +46,7 @@ def test_bin_path_resolved_to_absolute(tmp_path):
 
 # ------------------------------------------------------------- validation
 
+
 def test_validate_tool_config_accepts_valid_config():
     config = {
         "bin_path": "./bin",

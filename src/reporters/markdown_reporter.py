@@ -6,6 +6,7 @@ from src.reporters.base_reporter import BaseReporter
 
 logger = logging.getLogger(__name__)
 
+
 def _kv_table(data: dict, indent: str = "") -> list[str]:
     """Render a flat dict as a Markdown table (keys sorted for determinism)."""
     lines = [f"{indent}| Key | Value |", f"{indent}|---|---|"]
@@ -13,6 +14,7 @@ def _kv_table(data: dict, indent: str = "") -> list[str]:
         value = data[key]
         lines.append(f"{indent}| {key} | {value} |")
     return lines
+
 
 def _render_value(value, indent: str = "") -> list[str]:
     """Best-effort Markdown rendering of an arbitrary summary value."""
@@ -32,12 +34,14 @@ def _render_value(value, indent: str = "") -> list[str]:
     # Scalars / strings: one line, backticked for readability.
     return [f"{indent}`{value}`"]
 
+
 def _linkify(path_value):
     """Turn raw_output_path values into relative Markdown links."""
     text = str(path_value)
     if text and not text.startswith("http"):
         return f"[{text}]({text})"
     return text
+
 
 class MarkdownReporter(BaseReporter):
     name = "Markdown Report Generator"
@@ -47,7 +51,7 @@ class MarkdownReporter(BaseReporter):
     def generate(self, target_file, run_dir, reporter_config, timestamp):
         logger.debug(f"Starting Markdown report generation for {target_file.filename}")
 
-        sanitized_name = re.sub(r'[^a-zA-Z0-9.-]+', '_', target_file.filename)
+        sanitized_name = re.sub(r"[^a-zA-Z0-9.-]+", "_", target_file.filename)
         output_filename = f"{sanitized_name}_statcheck_summary_{timestamp}.md"
         output_path = os.path.join(run_dir, output_filename)
 
@@ -78,8 +82,7 @@ class MarkdownReporter(BaseReporter):
             lines.append("|---|---|---|")
             for plugin_id in sorted(plugin_statuses):
                 entry = plugin_statuses[plugin_id]
-                lines.append(f"| {plugin_id} | {entry.get('status', 'unknown')} "
-                             f"| {entry.get('duration_ms', 'n/a')} |")
+                lines.append(f"| {plugin_id} | {entry.get('status', 'unknown')} | {entry.get('duration_ms', 'n/a')} |")
             lines.append("")
 
         analyzed_by = metadata.get("analyzed_by", [])
@@ -94,8 +97,7 @@ class MarkdownReporter(BaseReporter):
             if isinstance(section, dict):
                 for key in sorted(section, key=str):
                     value = section[key]
-                    rendered = ([_linkify(value)] if key in ("raw_output_path", "extracted_to")
-                                else _render_value(value))
+                    rendered = [_linkify(value)] if key in ("raw_output_path", "extracted_to") else _render_value(value)
                     lines.append(f"### {key}")
                     lines.append("")
                     lines.extend(rendered)
@@ -112,5 +114,5 @@ class MarkdownReporter(BaseReporter):
             logger.error(f"Permission denied: Could not write Markdown report to {output_path}")
         except Exception as e:
             logger.exception(
-                f"An unexpected error occurred while generating Markdown report "
-                f"for {target_file.filename} : {e}")
+                f"An unexpected error occurred while generating Markdown report for {target_file.filename} : {e}"
+            )

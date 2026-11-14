@@ -6,11 +6,12 @@ from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
 
+
 class ELFStructureAnalyzer(BaseAnalyzer):
     name = "ELF Structure Analyzer"
-    supported_formats = ['elf']
+    supported_formats = ["elf"]
     plugin_id = "elfstructure"
-    
+
     depends = {"all": [], "any": []}
 
     @staticmethod
@@ -35,22 +36,28 @@ class ELFStructureAnalyzer(BaseAnalyzer):
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Starting ELF Structure analysis on {target_file.filename}")
-        
+
         try:
             elf = lief.ELF.parse(str(target_file.path))
             if not elf:
                 logger.error(f"LIEF failed to parse {target_file.filename} as an ELF.")
-                target_file.add_result(self.plugin_id, summary_data={
-                    "status": "unavailable",
-                    "reason": "LIEF could not parse the file as ELF.",
-                })
+                target_file.add_result(
+                    self.plugin_id,
+                    summary_data={
+                        "status": "unavailable",
+                        "reason": "LIEF could not parse the file as ELF.",
+                    },
+                )
                 return
         except Exception as e:
             logger.error(f"LIEF threw an exception while parsing ELF: {e}")
-            target_file.add_result(self.plugin_id, summary_data={
-                "status": "unavailable",
-                "reason": f"LIEF parse error: {e}",
-            })
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={
+                    "status": "unavailable",
+                    "reason": f"LIEF parse error: {e}",
+                },
+            )
             return
 
         # Hardening flags; guarded with getattr because LIEF availability of
@@ -75,9 +82,9 @@ class ELFStructureAnalyzer(BaseAnalyzer):
                 "has_stack_canary": has_canary,
             },
             "interpreter": elf.interpreter if elf.has_interpreter else "None (Statically Linked)",
-            "anomalies": {}
+            "anomalies": {},
         }
-        
+
         # Imported libraries (defensive: LIEF returns iterators in 1.0).
         try:
             libraries = sorted(str(lib) for lib in elf.libraries)
@@ -85,10 +92,7 @@ class ELFStructureAnalyzer(BaseAnalyzer):
             libraries = []
         summary["imported_libraries"] = libraries
 
-        complete_raw = {
-            "segments": [],
-            "dynamic_libraries": libraries
-        }
+        complete_raw = {"segments": [], "dynamic_libraries": libraries}
 
         # CHECK FOR STRIPPED SYMBOLS
         try:
@@ -106,25 +110,25 @@ class ELFStructureAnalyzer(BaseAnalyzer):
                 # cast the flags to an integer and use standard ELF bitwise logic:
                 # PF_R (Read) = 4, PF_W (Write) = 2, PF_X (Execute) = 1
                 flags = int(segment.flags)
-                
+
                 is_read = bool(flags & 4)
                 is_write = bool(flags & 2)
                 is_exec = bool(flags & 1)
-                
+
                 perms = ""
                 perms += "R" if is_read else "-"
                 perms += "W" if is_write else "-"
                 perms += "X" if is_exec else "-"
-                
+
                 seg_data = {
-                    "type": str(segment.type).split('.')[-1],
+                    "type": str(segment.type).split(".")[-1],
                     "virtual_address": hex(segment.virtual_address),
                     "virtual_size": segment.virtual_size,
-                    "permissions": perms
+                    "permissions": perms,
                 }
-                
+
                 complete_raw["segments"].append(seg_data)
-                
+
                 if perms == "RWX":
                     summary["flags"]["has_rwx_segments"] = True
                     rwx_segments.append(seg_data)
@@ -148,12 +152,8 @@ class ELFStructureAnalyzer(BaseAnalyzer):
             summary["flags"]["has_custom_rpath"] = True
             summary["anomalies"]["custom_library_paths"] = custom_paths
 
-        summary["raw_output_path"] = self.save_raw(
-            run_dir, "elfstructure_raw_output.json", complete_raw)
+        summary["raw_output_path"] = self.save_raw(run_dir, "elfstructure_raw_output.json", complete_raw)
 
         # FORMAT AND SAVE RESULTS
-        target_file.add_result(
-            self.plugin_id, 
-            summary_data=summary
-        )
+        target_file.add_result(self.plugin_id, summary_data=summary)
         logger.info("Successfully analyzed ELF Structure.")
