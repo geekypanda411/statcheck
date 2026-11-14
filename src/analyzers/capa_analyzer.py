@@ -1,8 +1,8 @@
 import subprocess
 import logging
-from src.analyzers.base_analyzer import BaseAnalyzer
+from pathlib import Path
+from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
 import json
-from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,21 @@ class CapaAnalyzer(BaseAnalyzer):
     def parse_analyzer_output(self, raw_results_dict: dict):
         output_summary = {}
 
+        #Guard: capa may be missing, have failed, or returned invalid JSON.
+        capa_all = raw_results_dict.get("capa-all")
+        if not isinstance(capa_all, dict):
+            logger.debug("No valid 'capa-all' payload to parse; returning empty summary.")
+            return output_summary
+
         #Get all matched rule names
-        matched_rules_list = (raw_results_dict["capa-all"]).get("rules",{})
+        matched_rules_list = capa_all.get("rules", {})
+        if not isinstance(matched_rules_list, dict):
+            logger.debug("'capa-all' payload has no rule dict; returning empty summary.")
+            return output_summary
 
         def extract_successful_features(node, matched_set):
+            if not isinstance(node, dict):
+                return
             # Base case: if this branch failed, ignore it
             if not node.get("success"):
                 return
@@ -42,6 +53,8 @@ class CapaAnalyzer(BaseAnalyzer):
 
         # Process each matched rule
         for rule_id, rule_data in matched_rules_list.items():
+            if not isinstance(rule_data, dict):
+                continue
             meta = rule_data.get("meta", {})
         
             # Format MITRE ATT&CK data if it exists
@@ -51,7 +64,7 @@ class CapaAnalyzer(BaseAnalyzer):
                 attack_tactics = attack.get("tactic", "")
                 attack_list.append(f"{attack_id} - {attack_tactics}")
 
-            # Temp dictionary using sets to deduplicate locations
+            # Temp set to deduplicate locations
             matched_features_temp = set()
         
             for match in rule_data.get("matches", []):
@@ -74,12 +87,20 @@ class CapaAnalyzer(BaseAnalyzer):
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Running capa on {target_file.filename}")
 
-        import os
-        if not os.path.exists(tool_path):
-            logger.error(f"Configured binary not found: {tool_path}")
-        else:
-            logger.debug(f"Identified tool at path: {tool_path}")
+        #Resolve the capa executable: configured path first, then PATH lookup.
+        executable = resolve_tool_path(tool_path)
+        if executable is None:
+            reason = (f"capa binary not found (configured: '{tool_path}', "
+                      f"also searched PATH for '{Path(tool_path).name if tool_path else 'capa'}').")
+            logger.warning(reason)
+            target_file.add_result(self.plugin_id, summary_data={
+                "status": "unavailable",
+                "reason": reason,
+            })
+            return
+        logger.debug(f"Using capa executable at: {executable}")
 
+        timeout = plugin_config.get("timeout", 300)
         capa_tasks = {"capa-all":"-jq"}
 
         raw_results = {}
@@ -89,30 +110,36 @@ class CapaAnalyzer(BaseAnalyzer):
 
             try:
                 # -j tells capa to output in pure JSON
-                result = subprocess.run([tool_path, flag, str(target_file.path)], capture_output=True, text=True, check=True)
+                result = subprocess.run(
+                    [executable, flag, str(target_file.path)],
+                    capture_output=True, text=True, check=True, timeout=timeout
+                )
                 
                 if not result.stdout.strip():
-                    logger.debug(f"capa flag {flag} returned empty output, SKipping.")
+                    logger.debug(f"capa flag {flag} returned empty output, skipping.")
                 else:
                     capa_data = json.loads(result.stdout)
                     raw_results[task_name] = capa_data
                     logger.debug(f"capa analysis for flag {flag} complete.")
                 
+            except subprocess.TimeoutExpired:
+                logger.warning(f"capa ({flag}) timed out after {timeout}s.")
             except subprocess.CalledProcessError as e:
                 # Use warning instead of error so that if one check fails the rest are still executed
-                logger.warning(f"capa ({flag}) failed to execute: {e.stderr.strip()}")
+                logger.warning(f"capa ({flag}) failed to execute: {(e.stderr or '').strip()}")
             except json.JSONDecodeError:
                 logger.warning(f"capa ({flag}) output could not be parsed as JSON.")
             except Exception as e:
                 logger.exception(f"Unexpected error in capa task '{task_name}'")
-        
+         
         logger.debug("Parsing capa output")
         parsed_results = self.parse_analyzer_output(raw_results)
 
-        plugin_dir = self.get_plugin_dir(run_dir)
-        raw_output_path = os.path.join(plugin_dir, "capa_raw_output.json")
-        with open(raw_output_path, "w") as f:
-            json.dump(raw_results, f, indent=4)
-        parsed_results["raw_output_path"] = raw_output_path
+        # Always write the raw output, even when empty/failed, so the run
+        # directory carries the evidence of what capa actually returned.
+        parsed_results["raw_output_path"] = self.save_raw(run_dir, "capa_raw_output.json", raw_results)
+        parsed_results["status"] = "ok" if "capa-all" in raw_results else "no_output"
+        if parsed_results["status"] != "ok":
+            parsed_results["reason"] = "capa produced no parseable output for this sample."
 
         target_file.add_result(self.plugin_id,summary_data=parsed_results)

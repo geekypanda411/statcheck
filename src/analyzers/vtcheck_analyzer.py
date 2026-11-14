@@ -1,8 +1,9 @@
 import logging
 import os
-import vt
 import time
-import json
+
+import vt
+
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
         api_key = os.environ.get(env_var_name)
 
         if not api_key:
-            logger.error(f"{self.name} is enabled, but '{env_var_name}' is missing!")
+            logger.error(f"{self.name} is enabled, but '{env_var_name}' is missing.")
             return
 
         summary = target_file.results.get("result_summary", {})
@@ -53,7 +54,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                             }
 
                             if plugin_config.get("fetch_relations_behaviour", False):
-                                logger.info(f"fetch_relations_behaviour set to true in config, API Calls will be made to fetch these.")
+                                logger.info("fetch_relations_behaviour is true; fetching relations.")
                                 relations_api_endpoints = {
                                     "contacted_ips": "Contacted IPs",
                                     "contacted_domains": "Contacted Domains",
@@ -66,16 +67,20 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                                 vt_summary["relations"] = {}
                                 vt_complete["relations_raw"] = {}
 
-                                for endpoint, human_name in relations_api_endpoints.items():
-                                    vt_api_sleep_time = 20
-                                    logger.info(f"Sleeping 20 Seconds to prevent violation of VT API Ratelimit")
-                                    time.sleep(vt_api_sleep_time)
+                                for index, (endpoint, human_name) in enumerate(relations_api_endpoints.items()):
+                                    # Sleep only BETWEEN relation requests, never before
+                                    # the first one, so single-request runs aren't slowed down.
+                                    if index > 0:
+                                        rate_limit_sleep = plugin_config.get("rate_limit_sleep", 20)
+                                        logger.info(f"Sleeping {rate_limit_sleep}s between relation requests.")
+                                        time.sleep(rate_limit_sleep)
 
                                     logger.info(f"Fetching VT relations: {human_name}")
                                     try:
                                         max_items = plugin_config.get("relations_result_limit", 40)
-                                        logger.debug(f"Maximum {max_items} will be fetched for {human_name} to change please edit tools_config.")
-                                        response_it = client.iterator(f'/files/{sha256}/{endpoint}', limit=max_items, batch_size=max_items)
+                                        logger.debug(f"Maximum {max_items} items for {human_name} (configurable).")
+                                        response_it = client.iterator(
+                            f'/files/{sha256}/{endpoint}', limit=max_items, batch_size=max_items)
 
                                         relations_raw_list = []
                                         relations_summary_list = []
@@ -94,7 +99,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
 
                                     except vt.error.APIError as e:
                                         if e.code == "ForbiddenError":
-                                            logger.debug(f"Skipped {human_name}: Premium API key required.")
+                                            logger.debug(f"Skipped {human_name}: premium API key required.")
                                             vt_summary["relations"][endpoint] = "Premium VT Key Required"
                                         logger.warning(f"Failed to fetch {human_name}: {e}")
 
@@ -108,7 +113,7 @@ class VirusTotalAnalyzer(BaseAnalyzer):
 
                 # --- 2. FUZZY HASH LOOKUP (SSDeep) ---
                 if plugin_config.get("lookup_fuzzy_hash", False):
-                    logger.debug(f"Fuzzy Hashing is enabled in config. It requires Premium API and may burn a lot of credits.")
+                    logger.debug("Fuzzy hashing enabled: requires Premium API and may burn a lot of credits.")
                     ssdeep = summary.get("fileinfo", {}).get("File_ssdeep")
                     if ssdeep:
                         logger.info("Querying VT for SSDeep similarity...")
@@ -118,8 +123,14 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                             # client.iterator handles API pagination!
                             # limit to 5 so we don't accidentally burn API quota on a massive search
                             max_fuzzy_lookups = plugin_config.get("fuzzy_lookup_limit", 5)
-                            query = f"ssdeep:\"{ssdeep}\""
-                            fuzzylookup_it = client.iterator(f'/search?query={query}', limit=max_fuzzy_lookups)
+                            query = f'ssdeep:"{ssdeep}"'
+                            # Pass the query as a request parameter so it is properly
+                            # encoded; embedding it raw in the URL breaks on quotes/spaces.
+                            fuzzylookup_it = client.iterator(
+                                "/search",
+                                params={"query": query},
+                                limit=max_fuzzy_lookups,
+                            )
                             
                             for related_file in fuzzylookup_it:
                                 fuzzy_matches.append({
@@ -133,22 +144,18 @@ class VirusTotalAnalyzer(BaseAnalyzer):
                     else:
                         logger.warning("No SSDeep hash found to query VT.")
 
-        except Exception as e:
+        except Exception:
             logger.exception("A critical error occurred while connecting to VirusTotal.")
 
         # Save to the TargetFile's Summary component!
         if vt_complete:
-            plugin_dir = self.get_plugin_dir(run_dir)
-            raw_output_path = os.path.join(plugin_dir, "virustotal_raw_output.json")
-            with open(raw_output_path, "w") as f:
-                json.dump(vt_complete, f, indent=4)
-            vt_summary["raw_output_path"] = raw_output_path
-            logger.info(f"Successfully added VirusTotal intelligence to {raw_output_path}")
+            vt_summary["raw_output_path"] = self.save_raw(run_dir, "virustotal_raw_output.json", vt_complete)
+            logger.info("Successfully added VirusTotal intelligence to the raw output file.")
         else:
-            logger.warning(f"Complete raw result for VirusTotal analyzer not available.")
+            logger.warning("Complete raw result for VirusTotal analyzer not available.")
         
         if vt_summary:
             target_file.add_result(self.plugin_id, summary_data=vt_summary)
-            logger.info("Successfully added MalwareBazaar intelligence to report.")
+            logger.info("Successfully added VirusTotal intelligence to report.")
         else:
-            logger.warning(f"Complete raw result for Malware Bazaar analyzer not available.")
+            logger.warning("Summary result for VirusTotal analyzer not available.")

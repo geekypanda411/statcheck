@@ -1,6 +1,25 @@
 from abc import ABC, abstractmethod
 import json
 import os
+import shutil
+from pathlib import Path
+
+
+def resolve_tool_path(tool_path: str) -> str | None:
+    """Resolve an external tool executable.
+
+    Order: the configured path if it exists and is executable, then a PATH
+    lookup by the configured basename (e.g. ``bin/capa-v10.0.0-linux`` falls
+    back to ``capa`` on PATH), else ``None``.
+    """
+    candidate = Path(tool_path)
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    which = shutil.which(candidate.name)
+    if which:
+        return which
+    return None
+
 
 class BaseAnalyzer(ABC):
     @property
