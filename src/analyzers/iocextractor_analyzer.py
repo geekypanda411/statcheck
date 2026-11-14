@@ -133,7 +133,7 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         
         # URLs (Run First)
         url_regex = r'(?i)\b(?:http|https|ftp|tcp|udp)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]'
-        raw_urls = list(set(re.findall(url_regex, massive_text_block)))
+        raw_urls = sorted(set(re.findall(url_regex, massive_text_block)))
         massive_text_block = re.sub(url_regex, " ", massive_text_block)
 
         # Registry Keys, gated to pe files only
@@ -141,13 +141,14 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
             hive_prefixes = ("HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|"
                              "HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC")
             registry_regex = rf'(?i)\b(?:{hive_prefixes})(?:\\[a-zA-Z0-9_\-\s]{{1,255}})+'
-            raw_regpaths = list(set(re.findall(registry_regex, massive_text_block)))
+            raw_regpaths = sorted(set(re.findall(registry_regex, massive_text_block)))
             massive_text_block = re.sub(registry_regex, " ", massive_text_block)
 
         # IPs (Safe now that URLs are removed)
         ipv4_regex = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
         ipv6_regex = r'\b(?:[a-fA-F0-9]{1,4}:){2,7}[a-fA-F0-9]{1,4}\b'
-        raw_ips = list(set(re.findall(ipv4_regex, massive_text_block) + re.findall(ipv6_regex, massive_text_block)))
+        raw_ips = sorted(set(re.findall(ipv4_regex, massive_text_block)
+                             + re.findall(ipv6_regex, massive_text_block)))
         massive_text_block = re.sub(ipv4_regex, " ", massive_text_block)
         massive_text_block = re.sub(ipv6_regex, " ", massive_text_block)
 
@@ -157,7 +158,7 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         tld_pattern = "|".join(tld_list)
         domain_regex = (rf'(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+'
                         rf'(?:{tld_pattern})(?=\n|:|$)')
-        raw_domains = list(set(d.lower() for d in re.findall(domain_regex, massive_text_block)))
+        raw_domains = sorted(set(d.lower() for d in re.findall(domain_regex, massive_text_block)))
         raw_domains = [d for d in raw_domains if len(d) <= 255] # Total DNS limit
         massive_text_block = re.sub(domain_regex, " ", massive_text_block)
 
@@ -165,12 +166,12 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         # Windows: Drive letter, forbidden chars < > : " / \ | ? *, segment len 1-255
         win_filepath_regex = (r'(?i)\b[A-Z]:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255}'
                               r'(?:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255})*(?<![ \.])(?=\n|$)')
-        raw_win_paths = list(set(re.findall(win_filepath_regex, massive_text_block)))
+        raw_win_paths = sorted(set(re.findall(win_filepath_regex, massive_text_block)))
         raw_win_paths = [p for p in raw_win_paths if len(p) <= 32760]
 
         # Unix: Allows spaces anywhere (unix permits this behavior, adds FPs); max 4096 length
         unix_filepath_regex = r'(?i)(?:[a-zA-Z0-9_\-\.\ ]{1,255})?(?:/[a-zA-Z0-9_\-\.\ ]{1,255})+(?=\n|$)'
-        raw_nix_paths = list(set(re.findall(unix_filepath_regex, massive_text_block)))
+        raw_nix_paths = sorted(set(re.findall(unix_filepath_regex, massive_text_block)))
         raw_nix_paths = [p for p in raw_nix_paths if len(p) <= 4096]
 
         # SAVE RESULTS

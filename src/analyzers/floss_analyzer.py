@@ -99,7 +99,8 @@ class FlossAnalyzer(BaseAnalyzer):
 
         # NORMALIZE FOR THE IOC Extractor
         # The Extractor expects a list of dictionaries with "string" and "tags"
-        ioc_input_list = [{"string": s, "tags": []} for s in extracted_strings]
+        # Deterministic order: same input -> byte-identical output.
+        ioc_input_list = [{"string": s, "tags": []} for s in sorted(extracted_strings)]
 
         # Enforce the max_strings limit (Phase 3.4).
         if len(ioc_input_list) > max_strings:

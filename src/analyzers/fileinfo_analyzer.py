@@ -1,13 +1,21 @@
+import contextlib
 import hashlib
 import logging
-import math
 import mimetypes
 
 import pefile
-import ppdeep
-import tlsh
+
+try:
+    import tlsh
+except ImportError:  # optional wheel; the tool must run without it
+    tlsh = None
+try:
+    import ppdeep
+except ImportError:
+    ppdeep = None
 
 from src.analyzers.base_analyzer import BaseAnalyzer
+from src.core.analysis_utils import shannon_entropy
 
 logger = logging.getLogger(__name__)
 
@@ -19,27 +27,17 @@ class BasicInfoAnalyzer(BaseAnalyzer):
 
     def calculate_entropy(self, data):
         #Calculates Shannon Entropy of a byte sequence (0.0 to 8.0)
-        if not data:
-            return 0.0
-        entropy = 0
-        for x in range(256):
-            p_x = float(data.count(x)) / len(data)
-            if p_x > 0:
-                entropy += - p_x * math.log2(p_x)
-        return round(entropy, 4)
+        return shannon_entropy(data)
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Extracting basic information for {target_file.filename}")
         
-        # Read the file into RAM
+        # Read the file into RAM (cached on the TargetFile: one read per run)
         try:
-            with open(target_file.path, "rb") as f:
-                file_data = f.read()
+            file_data = target_file.read_bytes()
         except Exception as e:
             logger.error(f"Failed to read file {target_file.filename}: {e}")
             return
-
-        summary = {}
 
         # 1. Basic Metadata
         summary = {
@@ -53,21 +51,27 @@ class BasicInfoAnalyzer(BaseAnalyzer):
             "File_SHA512": hashlib.sha512(file_data).hexdigest()
         }
         
-        try:
-            ssdeep_hash = ppdeep.hash(file_data)
-            if ssdeep_hash:
-                summary["File_ssdeep"] = ssdeep_hash
-        except Exception as e:
-            logger.warning(f"Failed to calculate SSDeep: {e}")
+        if ppdeep is not None:
+            try:
+                ssdeep_hash = ppdeep.hash(file_data)
+                if ssdeep_hash:
+                    summary["File_ssdeep"] = ssdeep_hash
+            except Exception as e:
+                logger.warning(f"Failed to calculate SSDeep: {e}")
+        else:
+            logger.warning("ppdeep is not installed; skipping SSDeep hash.")
 
-        try:
-            tlsh_hash = tlsh.hash(file_data)
-            if tlsh_hash and tlsh_hash != "TNULL":
-                 
-                summary["File_tlsh"] = tlsh_hash
-        except Exception as e:
-            logger.warning(f"Failed to calculate TLSH: {e}")
+        if tlsh is not None:
+            try:
+                tlsh_hash = tlsh.hash(file_data)
+                if tlsh_hash and tlsh_hash != "TNULL": 
+                    summary["File_tlsh"] = tlsh_hash
+            except Exception as e:
+                logger.warning(f"Failed to calculate TLSH: {e}")
+        else:
+            logger.warning("py-tlsh is not installed; skipping TLSH hash.")
 
+        pe = None
         try:
             pe = pefile.PE(target_file.path)
             imphash = pe.get_imphash()
@@ -77,6 +81,10 @@ class BasicInfoAnalyzer(BaseAnalyzer):
             pass # Not a PE file, totally fine.
         except Exception as e:
             logger.warning(f"Failed to calculate ImpHash: {e}")
+        finally:
+            if pe is not None:
+                with contextlib.suppress(Exception):
+                    pe.close()
 
         # SAVE TO TARGET FILE
         target_file.add_result(self.plugin_id, summary_data=summary)

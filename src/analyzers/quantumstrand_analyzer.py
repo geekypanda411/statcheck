@@ -132,7 +132,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
             # 1. Format the Pub/Sub contract for the IOC Extractor
             ioc_extractor_input.append({
                 "string": string_val,
-                "tags": list(tags_set)
+                "tags": sorted(tags_set)
             })
             
             # 2. Check if this string belongs in our Summary block
@@ -152,7 +152,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         summary["raw_output_path"] = self.save_raw(run_dir, "quantumstrand_raw_output.json", qs_json)
 
         # Clean empty lists from the summary (e.g., if no #winapi was found)
-        clean_summary = {k: (list(v) if isinstance(v, set) else v) for k, v in summary.items() if v}
+        clean_summary = {k: (sorted(v) if isinstance(v, set) else v) for k, v in summary.items() if v}
 
         # PUBLISH RESULTS
         target_file.add_result(

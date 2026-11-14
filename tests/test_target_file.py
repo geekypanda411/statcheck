@@ -48,3 +48,32 @@ def test_add_result_skips_none_payloads(target):
 def test_format_is_lowercased(tmp_path):
     t = TargetFile(str(tmp_path / "x.bin"), "PE")
     assert t.format == "pe"
+
+
+def test_read_bytes_is_cached(tmp_path):
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"payload-bytes")
+    t = TargetFile(str(sample), "pe")
+
+    first = t.read_bytes()
+    assert first == b"payload-bytes"
+
+    # Change the file on disk; the cached copy must be returned unchanged.
+    sample.write_bytes(b"different-bytes")
+    assert t.read_bytes() == b"payload-bytes"
+
+    # Cache is per-TargetFile instance.
+    t2 = TargetFile(str(sample), "pe")
+    assert t2.read_bytes() == b"different-bytes"
+
+
+def test_set_plugin_status_shapes(tmp_path):
+    t = TargetFile(str(tmp_path / "x.bin"), "pe")
+    t.set_plugin_status("p1", "completed", duration_ms=12.34567)
+    t.set_plugin_status("p2", "failed", error="boom", tool="diec")
+
+    plugins = t.results["metadata"]["plugins"]
+    assert plugins["p1"] == {"status": "completed", "duration_ms": 12.3}
+    assert plugins["p2"]["status"] == "failed"
+    assert plugins["p2"]["error"] == "boom"
+    assert plugins["p2"]["tool"] == "diec"

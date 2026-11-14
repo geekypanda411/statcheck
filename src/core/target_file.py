@@ -33,3 +33,22 @@ class TargetFile:
         if tool is not None:
             entry["tool"] = tool
         self.results.setdefault("metadata", {}).setdefault("plugins", {})[plugin_id] = entry
+
+    def read_bytes(self) -> bytes:
+        """Cached full read of the target file (one read per run)."""
+        if self._data is None:
+            self._data = self.path.read_bytes()
+        return self._data
+
+    def read_mmap(self):
+        """Memory-map the target file; callers must not keep the mmap alive.
+
+        Falls back to a plain (cached) read when mmap is not possible.
+        """
+        import mmap
+        try:
+            # The mmap stays valid after the fd is closed on POSIX platforms.
+            with open(self.path, "rb") as f:
+                return mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        except (ValueError, OSError):
+            return self.read_bytes()

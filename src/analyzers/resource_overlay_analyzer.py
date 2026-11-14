@@ -1,6 +1,5 @@
 import hashlib
 import logging
-import math
 import os
 import re
 
@@ -8,6 +7,7 @@ import lief
 import pefile
 
 from src.analyzers.base_analyzer import BaseAnalyzer
+from src.core.analysis_utils import shannon_entropy
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +19,7 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
     depends = {"all": [], "any": []}
 
     def _calc_entropy(self, data):
-        if not data:
-            return 0.0
-        entropy = 0
-        for x in range(256):
-            p_x = float(data.count(x)) / len(data)
-            if p_x > 0:
-                entropy += - p_x * math.log2(p_x)
-        return round(entropy, 4)
+        return shannon_entropy(data)
 
     def _get_magic_type(self, data):
         if data.startswith(b'MZ'):
@@ -69,9 +62,10 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
 
         total_extracted_bytes = 0
         
+        # Cached read: the file is loaded once per run and shared across
+        # byte-based analyzers.
         try:
-            with open(target_file.path, "rb") as f:
-                file_bytes = f.read()
+            file_bytes = target_file.read_bytes()
         except Exception as e:
             logger.error(f"Failed to read target file: {e}")
             return
