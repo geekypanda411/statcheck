@@ -18,6 +18,25 @@
                 "floss",
                 "capa"
             ]
+        },
+        "markdown_reporter": {
+            "name": "Markdown Output Generator",
+            "enabled": true,
+            "output_template": [
+                "fileinfo",
+                "pe_sections",
+                "elfstructure",
+                "authenticode",
+                "diec",
+                "yara_scanner",
+                "iocextractor",
+                "resource_overlay",
+                "malwarebazaar",
+                "vtlookup",
+                "quantumstrand",
+                "floss",
+                "capa"
+            ]
         }
     }
 }
