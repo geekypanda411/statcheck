@@ -1,7 +1,6 @@
 import logging
 import subprocess
 import json
-import os
 from src.analyzers.base_analyzer import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -91,7 +90,11 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
 
         if not deduped_strings:
             logger.warning("QUANTUMSTRAND did not find any strings in the file.")
-            target_file.add_result(self.plugin_id, complete_data={"raw_qs_output": qs_json})
+            raw_rel_path = self.save_raw(run_dir, "quantumstrand_raw_output.json", qs_json)
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={"strings_found": 0, "raw_output_path": raw_rel_path},
+            )
             return
 
         # FORMAT FOR IOC EXTRACTOR & SUMMARY
@@ -110,11 +113,7 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
                     clean_tag = target_tag.replace("#", "").replace("-", "_")
                     summary[f"{clean_tag}_strings"].add(string_val)
 
-        plugin_dir = self.get_plugin_dir(run_dir)
-        raw_output_path = os.path.join(plugin_dir, "quantumstrand_raw_output.json")
-        with open(raw_output_path, "w") as f:
-            json.dump(qs_json, f, indent=4)
-        summary["raw_output_path"] = raw_output_path
+        summary["raw_output_path"] = self.save_raw(run_dir, "quantumstrand_raw_output.json", qs_json)
 
         # Clean empty lists from the summary (e.g., if no #winapi was found)
         clean_summary = {k: (list(v) if isinstance(v, set) else v) for k, v in summary.items() if v}

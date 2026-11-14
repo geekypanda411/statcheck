@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import json
 import os
 
 class BaseAnalyzer(ABC):
@@ -31,6 +32,18 @@ class BaseAnalyzer(ABC):
         plugin_dir = os.path.join(run_dir, self.plugin_id)
         os.makedirs(plugin_dir, exist_ok=True)
         return plugin_dir
+
+    def save_raw(self, run_dir: str, filename: str, data) -> str:
+        """Write raw analyzer output as JSON into this plugin's directory.
+
+        Always returns a path **relative to** ``run_dir`` so reports stay
+        portable across machines and output locations.
+        """
+        plugin_dir = self.get_plugin_dir(run_dir)
+        path = os.path.join(plugin_dir, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, default=str)
+        return os.path.relpath(path, start=run_dir)
 
     @abstractmethod
     def analyze(self, target_file, tool_path: str, plugin_config: dict, run_dir: str):

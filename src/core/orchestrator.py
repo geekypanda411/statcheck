@@ -35,7 +35,11 @@ class Orchestrator:
     def _import_plugin_files(self, file_paths: list):
         if not hasattr(self, '_loaded_modules'):
             self._loaded_modules = []
-        
+        if not hasattr(self, '_imported_module_names'):
+            # Guard against re-importing the same plugin file, which would
+            # create duplicate class objects and duplicate registrations.
+            self._imported_module_names = set()
+
         for file_path in file_paths:
             if file_path.name in ["__init__.py", "base_analyzer.py", "base_reporter.py"]:
                 continue
@@ -43,14 +47,44 @@ class Orchestrator:
             file_path = Path(file_path)
             try:
                 module_name = ".".join(file_path.with_suffix("").parts)
+                if module_name in self._imported_module_names:
+                    logger.debug(f"Plugin already imported, skipping: {file_path.name}")
+                    continue
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 self._loaded_modules.append(module)
-                
+                self._imported_module_names.add(module_name)
+
                 spec.loader.exec_module(module)
             except Exception as e:
                 logger.exception(f"Failed to load plugin file {file_path.name}: {e}")
+
+    def _iter_plugin_subclasses(self, base_cls, id_attr: str):
+        """Yield each distinct plugin subclass exactly once.
+
+        Re-importing a plugin file creates a *new* class object even though the
+        module/class name is unchanged, and ``__subclasses__()`` then reports
+        both. Deduplicate by fully-qualified class name and by plugin id.
+        """
+        seen_class_names = set()
+        seen_ids = set()
+        for cls in base_cls.__subclasses__():
+            class_key = f"{cls.__module__}.{cls.__qualname__}"
+            if class_key in seen_class_names:
+                continue
+            seen_class_names.add(class_key)
+
+            # A non-overridden BaseAnalyzer.plugin_id is a property object;
+            # treat it as "no id" and fall back to class-identity dedupe.
+            plugin_id = getattr(cls, id_attr, None)
+            if isinstance(plugin_id, property):
+                plugin_id = None
+            if plugin_id is not None:
+                if plugin_id in seen_ids:
+                    continue
+                seen_ids.add(plugin_id)
+            yield cls
 
     def load_analyzers(self, base_plugins_dir: str):
         file_ignore_list = ["__init__.py", "base_analyzer.py"]
@@ -79,7 +113,10 @@ class Orchestrator:
 
         self._import_plugin_files(upd_target_files)
 
-        for analyzer_class in BaseAnalyzer.__subclasses__():
+        # Reset state so repeated calls are idempotent instead of appending
+        # duplicate registrations.
+        self.analyzers = []
+        for analyzer_class in self._iter_plugin_subclasses(BaseAnalyzer, "plugin_id"):
             analyzer = analyzer_class()
             formats = analyzer.supported_formats
             if 'all' in formats or self.file_format in formats:
@@ -104,8 +141,9 @@ class Orchestrator:
         logger.debug(f"Total reporters identified: {len(available_reporters)}")
 
         self._import_plugin_files(available_reporters)
-        
-        for reporter_class in BaseReporter.__subclasses__():
+
+        self.reporters = []
+        for reporter_class in self._iter_plugin_subclasses(BaseReporter, "reporter_id"):
             reporter = reporter_class()
             if 'all' in desired_reporter or reporter.format_id in desired_reporter:
                 self.reporters.append(reporter)
