@@ -44,3 +44,38 @@ def sorted_unique_capped(items, cap: int | None = None) -> list:
     if cap is not None and len(values) > cap:
         return values[:cap]
     return values
+
+
+# Common magic signatures for MIME detection (prefix matches).
+_MAGIC_SIGNATURES: list[tuple[bytes, str]] = [
+    (b"MZ", "application/x-dosexec"),
+    (b"\x7fELF", "application/x-elf-executable"),
+    (b"\xfe\xed\xfa\xce", "application/x-mach-binary"),
+    (b"\xce\xfa\xed\xfe", "application/x-mach-binary"),
+    (b"\xfe\xed\xfa\xcf", "application/x-mach-binary"),
+    (b"\xcf\xfa\xed\xfe", "application/x-mach-binary"),
+    (b"PK\x03\x04", "application/zip"),
+    (b"PK\x05\x06", "application/zip"),
+    (b"Rar!\x1a\x07", "application/vnd.rar"),
+    (b"7z\xbc\xaf\x27\x1c", "application/x-7z-compressed"),
+    (b"\x1f\x8b", "application/gzip"),
+    (b"BZh", "application/x-bzip2"),
+    (b"\xfd7zXZ\x00", "application/x-xz"),
+    (b"%PDF", "application/pdf"),
+    (b"\x89PNG", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"OggS", "application/ogg"),
+    (b"ID3", "audio/mpeg"),
+    (b"SQLite format 3\x00", "application/vnd.sqlite3"),
+    (b"\xca\xfe\xba\xbe", "application/java-vm"),  # ambiguous with fat Mach-O
+]
+
+
+def detect_mime_type(data: bytes) -> str | None:
+    """Best-effort MIME detection from magic bytes (prefix matches)."""
+    for magic, mime in _MAGIC_SIGNATURES:
+        if data.startswith(magic):
+            return mime
+    return None

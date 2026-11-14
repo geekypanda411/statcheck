@@ -16,6 +16,25 @@ from src.core.target_file import TargetFile
 
 # ---------------------------------------------------------------- MalwareBazaar
 
+@pytest.fixture()
+def mb_target(tmp_path):
+    target = TargetFile(str(tmp_path / "sample.bin"), "pe")
+    target.results["result_summary"]["fileinfo"] = {"File_SHA256": "ab" * 32}
+    return target
+
+
+@pytest.fixture()
+def fake_ti_cache(tmp_path, monkeypatch):
+    cache_location = tmp_path / "cache"
+    cache_location.mkdir(parents=True, exist_ok=True)
+    import src.core.cache as cache
+    import src.core.http as http
+
+    monkeypatch.setattr(cache, "cache_dir", lambda: cache_location)
+    monkeypatch.setattr(http, "cache_dir", lambda: cache_location)
+    return cache_location
+
+
 class FakeResponse:
     def __init__(self, status_code, payload=None):
         self.status_code = status_code
@@ -31,30 +50,23 @@ class FakeSession:
         self.calls = []
 
     def post(self, url, headers=None, data=None, timeout=None):
-        self.calls.append({"url": url, "data": data})
+        self.calls.append({"url": url, "data": data, "headers": headers})
         return self.responses.pop(0)
 
     def mount(self, *args, **kwargs):
         pass
 
 
-@pytest.fixture()
-def mb_target(tmp_path):
-    target = TargetFile(str(tmp_path / "sample.bin"), "pe")
-    target.results["result_summary"]["fileinfo"] = {"File_SHA256": "ab" * 32}
-    return target
-
-
 def _run_mb(monkeypatch, tmp_path, mb_target, responses, config=None):
     session = FakeSession(responses)
     monkeypatch.setenv("MB_API_KEY", "test-key")
-    monkeypatch.setattr("src.analyzers.malwarebazaar_analyzer.requests.Session", lambda: session)
+    monkeypatch.setattr("src.analyzers.malwarebazaar_analyzer.build_session", lambda: session)
     analyzer = MalwareBazaarAnalyzer()
     analyzer.analyze(mb_target, tool_path="", plugin_config=config or {}, run_dir=str(tmp_path / "run"))
     return mb_target, session
 
 
-def test_mb_empty_data_response_is_guarded(monkeypatch, tmp_path, mb_target):
+def test_mb_empty_data_response_is_guarded(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     """Regression: MB 'ok' with empty data used to raise IndexError."""
     payload = {"query_status": "ok", "data": []}
     target, _ = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)])
@@ -62,7 +74,7 @@ def test_mb_empty_data_response_is_guarded(monkeypatch, tmp_path, mb_target):
     assert summary["exact_match"] == "Empty response from MalwareBazaar."
 
 
-def test_mb_valid_exact_match(monkeypatch, tmp_path, mb_target):
+def test_mb_valid_exact_match(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     payload = {
         "query_status": "ok",
         "data": [{
@@ -81,12 +93,40 @@ def test_mb_valid_exact_match(monkeypatch, tmp_path, mb_target):
     assert summary["exact_match"]["tags"] == ["a", "z"]
     # The hash must travel in the POST body, not the URL.
     assert session.calls[0]["data"]["hash"] == "ab" * 32
+    # The API key must be sent as a header but never appear in the result.
+    assert session.calls[0]["headers"]["Auth-Key"] == "test-key"
+    assert "test-key" not in json.dumps(target.results["result_summary"])
 
 
-def test_mb_hash_not_found(monkeypatch, tmp_path, mb_target):
+def test_mb_hash_not_found(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     target, _ = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, {"query_status": "hash_not_found"})])
     summary = target.results["result_summary"]["malwarebazaar"]
     assert summary["exact_match"] == "File not found on MalwareBazaar."
+
+
+def test_mb_exact_lookup_is_cached_on_disk(monkeypatch, tmp_path, mb_target, fake_ti_cache):
+    """Second analysis of the same hash must not hit the API again."""
+    payload = {"query_status": "ok", "data": [{"signature": "Cached"}]}
+    target_a, session_a = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)])
+    assert len(session_a.calls) == 1
+
+    # Fresh target, same sha256: served from the on-disk cache.
+    target_b = TargetFile(str(tmp_path / "sample2.bin"), "pe")
+    target_b.results["result_summary"]["fileinfo"] = {"File_SHA256": "ab" * 32}
+    target_c, session_b = _run_mb(monkeypatch, tmp_path, target_b, [FakeResponse(200, payload)])
+    assert session_b.calls == [], "cached response must prevent a second API call"
+    assert target_c.results["result_summary"]["malwarebazaar"]["exact_match"]["signature"] == "Cached"
+    # Response payload persisted under the cache dir, never in the repo.
+    assert (fake_ti_cache / "ti" / "malwarebazaar.json").is_file()
+
+
+def test_mb_base_url_is_configurable(monkeypatch, tmp_path, mb_target, fake_ti_cache):
+    payload = {"query_status": "hash_not_found"}
+    target, session = _run_mb(
+        monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)],
+        config={"base_url": "http://127.0.0.1:1/api/"},
+    )
+    assert session.calls[0]["url"] == "http://127.0.0.1:1/api/"
 
 
 def test_mb_missing_api_key_publishes_nothing(monkeypatch, tmp_path, mb_target):
@@ -128,6 +168,7 @@ class FakeVTClient:
         self.file_obj = file_obj
         self.relation_items = relation_items or []
         self.iterator_calls = []
+        self.get_object_calls = 0
         self._endpoint_index = 0
 
     def __enter__(self):
@@ -137,6 +178,7 @@ class FakeVTClient:
         return False
 
     def get_object(self, path, *args, **kwargs):
+        self.get_object_calls += 1
         return self.file_obj
 
     def iterator(self, path, *args, **kwargs):
@@ -161,6 +203,10 @@ def _run_vt(monkeypatch, tmp_path, vt_target, client, config=None):
     monkeypatch.setenv("VT_API_KEY", "test-key")
     sleep_log = []
     monkeypatch.setattr("src.analyzers.vtcheck_analyzer.time.sleep", lambda s: sleep_log.append(s))
+    # Redirect the TI cache into tmp_path.
+    cache_location = tmp_path / "cache"
+    cache_location.mkdir(exist_ok=True)
+    monkeypatch.setattr("src.core.http.cache_dir", lambda: cache_location)
     analyzer = VirusTotalAnalyzer()
     analyzer.analyze(vt_target, tool_path="", plugin_config=config or {}, run_dir=str(tmp_path / "run"))
     return vt_target, sleep_log
@@ -225,3 +271,20 @@ def test_vt_missing_api_key_publishes_nothing(monkeypatch, tmp_path, vt_target):
     analyzer = VirusTotalAnalyzer()
     analyzer.analyze(vt_target, tool_path="", plugin_config={}, run_dir=str(tmp_path / "run"))
     assert "vtlookup" not in vt_target.results["result_summary"]
+
+
+def test_vt_exact_match_is_cached_on_disk(monkeypatch, tmp_path, vt_target):
+    file_obj = FakeVTObject({"meaningful_name": "evil.exe", "last_analysis_stats": {"malicious": 7}})
+    client = FakeVTClient(file_obj=file_obj)
+
+    target_a, _ = _run_vt(monkeypatch, tmp_path, vt_target, client)
+    assert client.get_object_calls == 1
+
+    # Second run with the same hash: served from the disk cache.
+    client2 = FakeVTClient(file_obj=file_obj)
+    target_b = TargetFile(str(tmp_path / "sample2.bin"), "pe")
+    target_b.results["result_summary"]["fileinfo"] = {"File_SHA256": "cd" * 32}
+    _run_vt(monkeypatch, tmp_path, target_b, client2)
+    assert client2.get_object_calls == 0, "cached VT lookup must not re-query the API"
+    summary_b = target_b.results["result_summary"]["vtlookup"]
+    assert summary_b["exact_match"]["malicious_votes"] == 7

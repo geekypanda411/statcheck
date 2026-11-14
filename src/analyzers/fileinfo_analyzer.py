@@ -15,7 +15,7 @@ except ImportError:
     ppdeep = None
 
 from src.analyzers.base_analyzer import BaseAnalyzer
-from src.core.analysis_utils import shannon_entropy
+from src.core.analysis_utils import detect_mime_type, shannon_entropy
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +40,14 @@ class BasicInfoAnalyzer(BaseAnalyzer):
             return
 
         # 1. Basic Metadata
+        # MIME type from magic bytes is authoritative; the extension-based
+        # guess is preserved separately (both are useful, they disagree often).
+        magic_mime = detect_mime_type(file_data)
         summary = {
             "Filename": target_file.filename,
             "Size_Bytes": len(file_data),
-            "MIME_Type": mimetypes.guess_type(target_file.path)[0] or "Unknown",
+            "MIME_Type": magic_mime or mimetypes.guess_type(target_file.path)[0] or "Unknown",
+            "MIME_Type_Guess": mimetypes.guess_type(target_file.path)[0] or "Unknown",
             "Entropy": self.calculate_entropy(file_data),
             "File_MD5": hashlib.md5(file_data).hexdigest(),
             "File_SHA1": hashlib.sha1(file_data).hexdigest(),

@@ -17,6 +17,8 @@ DEFAULT_LIMITS = {
     "max_raw_json_mb": 512,                    # raw JSON files per plugin
     "max_summary_items": 10000,                # per summary category
     "max_strings": 1_000_000,                  # strings fed to IOC extraction
+    "max_ioc_text_mb": 64,                     # text block fed to IOC regexes
+    "max_matches": 1000,                       # YARA matches kept per run
 }
 
 

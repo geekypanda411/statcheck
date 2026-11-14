@@ -80,6 +80,10 @@ class CapaAnalyzer(BaseAnalyzer):
                 "name": meta.get("name", rule_id),
                 "rule_description": meta.get("description", ""),
                 "rule_attack": attack_list,
+                "mbc": meta.get("mbc", []),
+                "namespace": meta.get("namespace", ""),
+                "scopes": meta.get("scopes", {}),
+                "lib": bool(meta.get("lib", False)),
                 "matched_features": clean_matched_features
             }
 
@@ -102,32 +106,35 @@ class CapaAnalyzer(BaseAnalyzer):
         logger.debug(f"Using capa executable at: {executable}")
 
         timeout = self.resolve_timeout(plugin_config)
-        capa_tasks = {"capa-all":"-jq"}
+        # Tell capa the sample format explicitly; capa rejects formats it does
+        # not know, so anything exotic falls back to 'auto'.
+        capa_format = target_file.format if target_file.format in ("pe", "elf") else "auto"
+        capa_tasks = {"capa-all": ["-jq", "-f", capa_format]}
 
         raw_results = {}
 
-        for task_name, flag in capa_tasks.items():
-            logger.debug(f"Running capa with flag: {flag}")
+        for task_name, flags in capa_tasks.items():
+            logger.debug(f"Running capa with flags: {flags}")
 
             try:
                 # -j tells capa to output in pure JSON
                 result = run_tool(
-                    [executable, flag, str(target_file.path)],
+                    [executable, *flags, str(target_file.path)],
                     timeout=timeout
                 )
                 
                 if not result.stdout.strip():
-                    logger.debug(f"capa flag {flag} returned empty output, skipping.")
+                    logger.debug(f"capa flags {flags} returned empty output, skipping.")
                 else:
                     capa_data = json.loads(result.stdout)
                     raw_results[task_name] = capa_data
-                    logger.debug(f"capa analysis for flag {flag} complete.")
+                    logger.debug(f"capa analysis for flags {flags} complete.")
                 
             except ToolError as e:
                 # Use warning instead of error so that if one check fails the rest are still executed
-                logger.warning(f"capa ({flag}) failed to execute: {e}")
+                logger.warning(f"capa ({flags}) failed to execute: {e}")
             except json.JSONDecodeError:
-                logger.warning(f"capa ({flag}) output could not be parsed as JSON.")
+                logger.warning(f"capa ({flags}) output could not be parsed as JSON.")
             except Exception:
                 logger.exception(f"Unexpected error in capa task '{task_name}'")
          

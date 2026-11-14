@@ -102,15 +102,17 @@ def test_relative_tld_file_is_project_root_relative(analyzer, fake_cache):
     assert path == (PROJECT_ROOT / "bin" / "tlds.txt").resolve()
 
 
-def _run_extract(analyzer, tmp_path, strings_by_source):
+def _run_extract(analyzer, tmp_path, strings_by_source, config=None):
     target = TargetFile(str(tmp_path / "sample.bin"), "pe")
     for source, strings in strings_by_source.items():
         target.results["internal_context"][source] = {
             "ioc_extractor_input": [{"string": s, "tags": tags} for s, tags in strings]
         }
-    analyzer.analyze(target, tool_path="", plugin_config={
-        "tld_file": str(tmp_path / "fresh-tlds.txt"),
-    }, run_dir=str(tmp_path / "run"))
+    plugin_config = {"tld_file": str(tmp_path / "fresh-tlds.txt")}
+    if config:
+        plugin_config.update(config)
+    analyzer.analyze(target, tool_path="", plugin_config=plugin_config,
+                     run_dir=str(tmp_path / "run"))
     # Pre-seed the TLD list so no network is attempted.
     (tmp_path / "fresh-tlds.txt").write_text("com\nnet\norg\nevil\n")
     return target
@@ -144,3 +146,73 @@ def test_ioc_extraction_ignores_tagged_strings(analyzer, fake_cache, monkeypatch
     })
     # #winapi-tagged strings are excluded by default ignore_tags.
     assert "iocextractor" not in target.results["result_summary"]
+
+
+# ---------------------------------------------- Phase 5.5 behavior coverage
+
+def _extract_strings(analyzer, fake_cache, tmp_path, strings, config=None):
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
+    target = _run_extract(analyzer, tmp_path, {"floss": [(s, []) for s in strings]}, config=config)
+    return target.results["result_summary"].get("iocextractor", {})
+
+
+def test_domain_followed_by_punctuation_is_extracted(analyzer, fake_cache, monkeypatch, tmp_path):
+    summary = _extract_strings(analyzer, fake_cache, tmp_path, [
+        "beacon from c2.evil.com, then sleep",
+        "backup host c2backup.evil.com); done",
+    ])
+    assert "c2.evil.com" in summary["regex_domains"]
+    assert "c2backup.evil.com" in summary["regex_domains"]
+
+
+def test_known_false_positives_are_not_iocs(analyzer, fake_cache, monkeypatch, tmp_path):
+    summary = _extract_strings(analyzer, fake_cache, tmp_path, [
+        "dead:beef",
+        "/opt/tools/file.zip",
+        "0.0.0",
+    ])
+    assert summary.get("regex_ip") is None, f"dead:beef/0.0.0 must not be IPs: {summary.get('regex_ip')}"
+    assert summary.get("regex_domains") is None, (
+        f"path-embedded file.zip must not be a domain: {summary.get('regex_domains')}")
+    # The unix path is extracted instead.
+    assert "/opt/tools/file.zip" in summary["regex_unixfilepath"]
+
+
+def test_exclude_private_ips_option(analyzer, fake_cache, monkeypatch, tmp_path):
+    summary = _extract_strings(
+        analyzer, fake_cache, tmp_path,
+        ["dial 185.220.101.5 or 127.0.0.1 or 192.168.1.10, ok"],
+        config={"exclude_private_ips": True},
+    )
+    ips = summary["regex_ip"]
+    assert "185.220.101.5" in ips
+    assert "127.0.0.1" not in ips
+    assert "192.168.1.10" not in ips
+
+
+def test_exclude_private_ips_off_by_default(analyzer, fake_cache, monkeypatch, tmp_path):
+    summary = _extract_strings(
+        analyzer, fake_cache, tmp_path,
+        ["dial 127.0.0.1 and 10.0.0.5, ok"],
+    )
+    assert "127.0.0.1" in summary["regex_ip"]
+    assert "10.0.0.5" in summary["regex_ip"]
+
+
+def test_defang_option(analyzer, fake_cache, monkeypatch, tmp_path):
+    summary = _extract_strings(
+        analyzer, fake_cache, tmp_path,
+        ["visit http://evil.example.com/payload now"],
+        config={"defang": True},
+    )
+    assert "hxxp://evil[.]example[.]com/payload" in summary["regex_urls"]
+
+
+def test_tld_pattern_escapes_and_chunks():
+    pattern = IOCExtractorAnalyzer._build_tld_pattern(["com", "ne.t", "org"])
+    # Dots inside TLDs must be escaped.
+    assert "ne\\.t" in pattern
+    # Large lists are chunked into groups of 500.
+    tlds = [f"tld{i}" for i in range(1200)]
+    big = IOCExtractorAnalyzer._build_tld_pattern(tlds, chunk_size=500)
+    assert big.count("(?:") >= 3

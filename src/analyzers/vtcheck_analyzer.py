@@ -5,6 +5,7 @@ import time
 import vt
 
 from src.analyzers.base_analyzer import BaseAnalyzer
+from src.core.http import cached_response
 
 logger = logging.getLogger(__name__)
 
@@ -19,95 +20,115 @@ class VirusTotalAnalyzer(BaseAnalyzer):
         api_key = os.environ.get(env_var_name)
 
         if not api_key:
-            logger.error(f"{self.name} is enabled, but '{env_var_name}' is missing.")
+            logger.error(f"{self.name} is enabled, but '{env_var_name}' is missing!")
             return
 
         summary = target_file.results.get("result_summary", {})
         vt_summary = {}
         vt_complete = {}
+        cache_ttl = int(plugin_config.get("cache_ttl_seconds", 24 * 3600))
 
         # Initialize the official VT client
         try:
             with vt.Client(api_key) as client:
                 
-                # --- 1. EXACT HASH LOOKUP ---
+                # --- 1. EXACT HASH LOOKUP (cached on disk to spare quota) ---
                 if plugin_config.get("lookup_exact_hash", True):
                     sha256 = summary.get("fileinfo", {}).get("File_SHA256")
                     if sha256:
                         logger.info(f"Querying VT for exact hash: {sha256}")
-                        try:
-                            file_obj = client.get_object(f"/files/{sha256}")
+
+                        def fetch_vt_exact():
+                            try:
+                                file_obj = client.get_object(f"/files/{sha256}")
+                            except vt.error.APIError as e:
+                                if e.code == "NotFoundError":
+                                    return {"not_found": True}
+                                logger.error(f"VT Exact Hash Error: {e}")
+                                return None
+                            except Exception as e:
+                                logger.error(f"VT Exact Hash Error: {e}")
+                                return None
 
                             raw_data = file_obj.to_dict()
-                            vt_complete["exact_hash_match_raw"] = raw_data
-                            
                             stats = file_obj.last_analysis_stats
-                            
-                            vt_summary["exact_match"] = {
-                                "malicious_votes": stats.get("malicious", 0),
-                                "meaningful_name": file_obj.get("meaningful_name", "Unknown"),
-                                "reputation": file_obj.get("reputation", 0),
-                                "authentihash": file_obj.get("authentihash"),
-                                "first_submission": str(file_obj.get("first_submission_date","Unknown")),
-                                "signature_info": file_obj.get("signature_info"),
-                                "yara_results_vt": file_obj.get("crowdsourced_yara_results")
+                            return {
+                                "raw": raw_data,
+                                "summary": {
+                                    "malicious_votes": stats.get("malicious", 0),
+                                    "meaningful_name": file_obj.get("meaningful_name", "Unknown"),
+                                    "reputation": file_obj.get("reputation", 0),
+                                    "authentihash": file_obj.get("authentihash"),
+                                    "first_submission": str(file_obj.get("first_submission_date", "Unknown")),
+                                    "signature_info": file_obj.get("signature_info"),
+                                    "yara_results_vt": file_obj.get("crowdsourced_yara_results"),
+                                },
                             }
 
-                            if plugin_config.get("fetch_relations_behaviour", False):
-                                logger.info("fetch_relations_behaviour is true; fetching relations.")
-                                relations_api_endpoints = {
-                                    "contacted_ips": "Contacted IPs",
-                                    "contacted_domains": "Contacted Domains",
-                                    "dropped_files": "Dropped Files",
-                                    "bundled_files": "Bundled Files",
-                                    "execution_parents": "Execution Parents",
-                                    "itw_urls": "In-The-Wild URLs"
-                                }
+                        cached, _from_cache = cached_response(
+                            "vt", f"files:{sha256}", fetch_vt_exact, ttl_seconds=cache_ttl)
 
-                                vt_summary["relations"] = {}
-                                vt_complete["relations_raw"] = {}
+                        if cached and cached.get("not_found"):
+                            vt_summary["exact_match"] = "File not found on VirusTotal."
+                        elif cached:
+                            vt_complete["exact_hash_match_raw"] = cached["raw"]
+                            vt_summary["exact_match"] = cached["summary"]
+                        else:
+                            logger.warning("VT exact hash lookup produced no result.")
 
-                                for index, (endpoint, human_name) in enumerate(relations_api_endpoints.items()):
-                                    # Sleep only BETWEEN relation requests, never before
-                                    # the first one, so single-request runs aren't slowed down.
-                                    if index > 0:
-                                        rate_limit_sleep = plugin_config.get("rate_limit_sleep", 20)
-                                        logger.info(f"Sleeping {rate_limit_sleep}s between relation requests.")
-                                        time.sleep(rate_limit_sleep)
+                        # --- 1b. RELATIONS (always fetched live: paginated
+                        # and premium-gated, not worth caching) ---
+                        if cached and not cached.get("not_found") \
+                                and plugin_config.get("fetch_relations_behaviour", False):
+                            logger.info("fetch_relations_behaviour is true; fetching relations.")
+                            relations_api_endpoints = {
+                                "contacted_ips": "Contacted IPs",
+                                "contacted_domains": "Contacted Domains",
+                                "dropped_files": "Dropped Files",
+                                "bundled_files": "Bundled Files",
+                                "execution_parents": "Execution Parents",
+                                "itw_urls": "In-The-Wild URLs"
+                            }
 
-                                    logger.info(f"Fetching VT relations: {human_name}")
-                                    try:
-                                        max_items = plugin_config.get("relations_result_limit", 40)
-                                        logger.debug(f"Maximum {max_items} items for {human_name} (configurable).")
-                                        response_it = client.iterator(
-                            f'/files/{sha256}/{endpoint}', limit=max_items, batch_size=max_items)
+                            vt_summary["relations"] = {}
+                            vt_complete["relations_raw"] = {}
 
-                                        relations_raw_list = []
-                                        relations_summary_list = []
+                            for index, (endpoint, human_name) in enumerate(relations_api_endpoints.items()):
+                                # Sleep only BETWEEN relation requests, never before
+                                # the first one, so single-request runs aren't slowed down.
+                                if index > 0:
+                                    rate_limit_sleep = plugin_config.get("rate_limit_sleep", 20)
+                                    logger.info(f"Sleeping {rate_limit_sleep}s between relation requests.")
+                                    time.sleep(rate_limit_sleep)
 
-                                        for item in response_it:
-                                            relations_raw_list.append(item.to_dict())
+                                logger.info(f"Fetching VT relations: {human_name}")
+                                try:
+                                    max_items = plugin_config.get("relations_result_limit", 40)
+                                    logger.debug(f"Maximum {max_items} items for {human_name} (configurable).")
+                                    response_it = client.iterator(
+                                        f'/files/{sha256}/{endpoint}', limit=max_items, batch_size=max_items)
 
-                                            if endpoint == "itw_urls":
-                                                relations_summary_list.append(item.get("url"))
-                                            else:
-                                                relations_summary_list.append(item.id)
+                                    relations_raw_list = []
+                                    relations_summary_list = []
 
-                                        if relations_raw_list:
-                                            vt_complete["relations_raw"][endpoint] = relations_raw_list
-                                            vt_summary["relations"][endpoint] = relations_summary_list
+                                    for item in response_it:
+                                        relations_raw_list.append(item.to_dict())
 
-                                    except vt.error.APIError as e:
-                                        if e.code == "ForbiddenError":
-                                            logger.debug(f"Skipped {human_name}: premium API key required.")
-                                            vt_summary["relations"][endpoint] = "Premium VT Key Required"
-                                        logger.warning(f"Failed to fetch {human_name}: {e}")
+                                        if endpoint == "itw_urls":
+                                            relations_summary_list.append(item.get("url"))
+                                        else:
+                                            relations_summary_list.append(item.id)
 
-                        except vt.error.APIError as e:
-                            if e.code == "NotFoundError":
-                                vt_summary["exact_match"] = "File not found on VirusTotal."
-                            else:
-                                logger.error(f"VT Exact Hash Error: {e}")
+                                    if relations_raw_list:
+                                        vt_complete["relations_raw"][endpoint] = relations_raw_list
+                                        vt_summary["relations"][endpoint] = sorted(
+                                            str(x) for x in relations_summary_list)
+
+                                except vt.error.APIError as e:
+                                    if e.code == "ForbiddenError":
+                                        logger.debug(f"Skipped {human_name}: premium API key required.")
+                                        vt_summary["relations"][endpoint] = "Premium VT Key Required"
+                                    logger.warning(f"Failed to fetch {human_name}: {e}")
                     else:
                         logger.warning("No SHA256 found to query VT.")
 

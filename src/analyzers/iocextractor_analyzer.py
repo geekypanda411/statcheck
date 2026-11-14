@@ -32,6 +32,36 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
             return resolve_path(configured)
         return cache_dir() / "tlds.txt"
 
+    @staticmethod
+    def _build_tld_pattern(tld_list, chunk_size: int = 500) -> str:
+        """Build an escaped, chunked TLD alternation.
+
+        Every TLD is ``re.escape``d (some contain dots like ``xn--`` variants
+        punycode or IDN forms) and the alternation is grouped in chunks so the
+        compiled pattern stays manageable for very large TLD lists.
+        """
+        escaped = [re.escape(t) for t in tld_list if t]
+        if not escaped:
+            escaped = [re.escape("com")]
+        chunks = [escaped[i:i + chunk_size] for i in range(0, len(escaped), chunk_size)]
+        return "|".join("(?:{})".format("|".join(chunk)) for chunk in chunks)
+
+    @staticmethod
+    def _is_private_ip(ip: str) -> bool:
+        """True for loopback/private/link-local/reserved addresses."""
+        import ipaddress
+
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+
+    @staticmethod
+    def _defang(indicator: str) -> str:
+        """Defang a URL/domain so it cannot be clicked accidentally."""
+        return indicator.replace("http://", "hxxp://").replace("https://", "hxxps://").replace(".", "[.]")
+
     def _update_tld_list(self, plugin_config):
         #IANA TLD list updater.
         # IMPORTANT: this never writes to tools_config.json. Update metadata
@@ -121,6 +151,15 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         massive_text_block = "\n".join(master_string_pool)
         tld_list = self._update_tld_list(plugin_config)
 
+        # Cap the total text size fed to the regex engine.
+        max_text_bytes = int(self.get_limit("max_ioc_text_mb")) * 1024 * 1024
+        if len(massive_text_block.encode("utf-8", errors="ignore")) > max_text_bytes:
+            logger.warning(
+                f"iocextractor: input text exceeds max_ioc_text_mb; truncating to {max_text_bytes} bytes."
+            )
+            massive_text_block = massive_text_block.encode("utf-8", errors="ignore")[:max_text_bytes].decode(
+                "utf-8", errors="ignore")
+
         # Initialize holding lists
         raw_urls = []
         raw_regpaths = []
@@ -129,50 +168,71 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         raw_win_paths = []
         raw_nix_paths = []
 
-        # CASCADING REGEX ENGINE
-        
+        # Punctuation-tolerant end-of-match lookahead: IOCs are frequently
+        # embedded in sentences followed by ',', ';', ')' or ']'.
+        _END = r'(?=$|[\n,;)\]}])'
+
+        # CASCADING REGEX ENGINE (re.ASCII keeps \b, \d, \s byte-oriented)
+         
         # URLs (Run First)
-        url_regex = r'(?i)\b(?:http|https|ftp|tcp|udp)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]'
-        raw_urls = sorted(set(re.findall(url_regex, massive_text_block)))
-        massive_text_block = re.sub(url_regex, " ", massive_text_block)
+        url_regex = re.compile(
+            r'(?i)\b(?:http|https|ftp|tcp|udp)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]',
+            re.ASCII)
+        raw_urls = sorted(set(url_regex.findall(massive_text_block)))
+        massive_text_block = url_regex.sub(" ", massive_text_block)
 
         # Registry Keys, gated to pe files only
         if target_file.format == 'pe':
             hive_prefixes = ("HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|"
                              "HKEY_USERS|HKEY_CURRENT_CONFIG|HKLM|HKCU|HKCR|HKU|HKCC")
-            registry_regex = rf'(?i)\b(?:{hive_prefixes})(?:\\[a-zA-Z0-9_\-\s]{{1,255}})+'
-            raw_regpaths = sorted(set(re.findall(registry_regex, massive_text_block)))
-            massive_text_block = re.sub(registry_regex, " ", massive_text_block)
+            registry_regex = re.compile(
+                rf'(?i)\b(?:{hive_prefixes})(?:\\[a-zA-Z0-9_\-\s]{{1,255}})+', re.ASCII)
+            raw_regpaths = sorted(set(registry_regex.findall(massive_text_block)))
+            massive_text_block = registry_regex.sub(" ", massive_text_block)
 
         # IPs (Safe now that URLs are removed)
-        ipv4_regex = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-        ipv6_regex = r'\b(?:[a-fA-F0-9]{1,4}:){2,7}[a-fA-F0-9]{1,4}\b'
-        raw_ips = sorted(set(re.findall(ipv4_regex, massive_text_block)
-                             + re.findall(ipv6_regex, massive_text_block)))
-        massive_text_block = re.sub(ipv4_regex, " ", massive_text_block)
-        massive_text_block = re.sub(ipv6_regex, " ", massive_text_block)
+        ipv4_regex = re.compile(
+            r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}'
+            r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b', re.ASCII)
+        ipv6_regex = re.compile(r'\b(?:[a-fA-F0-9]{1,4}:){2,7}[a-fA-F0-9]{1,4}\b', re.ASCII)
+        raw_ips = sorted(set(ipv4_regex.findall(massive_text_block)
+                             + ipv6_regex.findall(massive_text_block)))
+        massive_text_block = ipv4_regex.sub(" ", massive_text_block)
+        massive_text_block = ipv6_regex.sub(" ", massive_text_block)
+
+        # Optionally drop private/loopback/link-local addresses.
+        if plugin_config.get("exclude_private_ips", False):
+            raw_ips = [ip for ip in raw_ips if not self._is_private_ip(ip)]
 
         # Domains (Positive lookahead ensures it ends at string boundary, slash, or colon)
         # - Negative lookbehind (?<![/\\]) ensures we don't accidentally rip "file.zip" out of a filepath
-        # - Positive lookahead (?=\n|:|$) ensures it ends cleanly
-        tld_pattern = "|".join(tld_list)
-        domain_regex = (rf'(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+'
-                        rf'(?:{tld_pattern})(?=\n|:|$)')
-        raw_domains = sorted(set(d.lower() for d in re.findall(domain_regex, massive_text_block)))
+        # - Positive lookahead (_END) ensures it ends cleanly at punctuation or line end
+        tld_pattern = self._build_tld_pattern(tld_list)
+        domain_regex = re.compile(
+            rf'(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+'
+            rf'(?:{tld_pattern}){_END}', re.ASCII)
+        raw_domains = sorted(set(d.lower() for d in domain_regex.findall(massive_text_block)))
         raw_domains = [d for d in raw_domains if len(d) <= 255] # Total DNS limit
-        massive_text_block = re.sub(domain_regex, " ", massive_text_block)
+        massive_text_block = domain_regex.sub(" ", massive_text_block)
 
         # File Paths (OS Constrained, End of Line Anchored)
         # Windows: Drive letter, forbidden chars < > : " / \ | ? *, segment len 1-255
-        win_filepath_regex = (r'(?i)\b[A-Z]:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255}'
-                              r'(?:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255})*(?<![ \.])(?=\n|$)')
-        raw_win_paths = sorted(set(re.findall(win_filepath_regex, massive_text_block)))
+        win_filepath_regex = re.compile(
+            r'(?i)\b[A-Z]:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255}'
+            r'(?:(?:\\|\\\\)[^<>:"/\\|?*\n]{1,255})*(?<![ \.])' + _END, re.ASCII)
+        raw_win_paths = sorted(set(win_filepath_regex.findall(massive_text_block)))
         raw_win_paths = [p for p in raw_win_paths if len(p) <= 32760]
 
         # Unix: Allows spaces anywhere (unix permits this behavior, adds FPs); max 4096 length
-        unix_filepath_regex = r'(?i)(?:[a-zA-Z0-9_\-\.\ ]{1,255})?(?:/[a-zA-Z0-9_\-\.\ ]{1,255})+(?=\n|$)'
-        raw_nix_paths = sorted(set(re.findall(unix_filepath_regex, massive_text_block)))
+        unix_filepath_regex = re.compile(
+            r'(?i)(?:[a-zA-Z0-9_\-\.\ ]{1,255})?(?:/[a-zA-Z0-9_\-\.\ ]{1,255})+' + _END, re.ASCII)
+        raw_nix_paths = sorted(set(unix_filepath_regex.findall(massive_text_block)))
         raw_nix_paths = [p for p in raw_nix_paths if len(p) <= 4096]
+
+        # Optional defanging of URLs/domains for safe report sharing.
+        if plugin_config.get("defang", False):
+            raw_urls = [self._defang(u) for u in raw_urls]
+            raw_domains = [self._defang(d) for d in raw_domains]
 
         # SAVE RESULTS
         # Enforce the max_summary_items limit per category (Phase 3.4).
