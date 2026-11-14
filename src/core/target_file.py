@@ -6,7 +6,7 @@ class TargetFile:
         self.path = Path(file_path)
         self.filename = self.path.name
         self.format = file_format.lower()
-        self.results = {"metadata": {}, "result_summary": {}, "internal_context": {}}
+        self.results: dict = {"metadata": {}, "result_summary": {}, "internal_context": {}}
         self._data: bytes | None = None
 
     def add_result(self, tool_name: str, summary_data=None, internal_context_data=None):
@@ -31,7 +31,7 @@ class TargetFile:
         Statuses: completed, failed, skipped_disabled, skipped_dependency,
         unavailable, timeout.
         """
-        entry = {"status": status}
+        entry: dict = {"status": status}
         if error is not None:
             entry["error"] = error
         if duration_ms is not None:

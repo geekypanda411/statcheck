@@ -27,7 +27,7 @@ def _get_version() -> str:
 
 def setup_logging(is_debug: bool, log_file: str):
     log_level = logging.DEBUG if is_debug else logging.INFO
-    handlers = []
+    handlers: list = []
     if log_file:
         handlers.append(logging.FileHandler(log_file))
     else:

@@ -37,7 +37,7 @@ class AuthenticodeAnalyzer(BaseAnalyzer):
 
     def _sig_timestamp_info(self, sig) -> dict:
         """Detect signing-time / countersignature attributes defensively."""
-        info = {"has_timestamp": None, "countersigned": None}
+        info: dict = {"has_timestamp": None, "countersigned": None}
         try:
             content_info = getattr(sig, "content_info", None)
             if content_info is not None:

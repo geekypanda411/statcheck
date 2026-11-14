@@ -15,7 +15,7 @@ class CapaAnalyzer(BaseAnalyzer):
     depends = {"all": [], "any": []}
 
     def parse_analyzer_output(self, raw_results_dict: dict):
-        output_summary = {}
+        output_summary: dict = {}
 
         # Guard: capa may be missing, have failed, or returned invalid JSON.
         capa_all = raw_results_dict.get("capa-all")
@@ -67,7 +67,7 @@ class CapaAnalyzer(BaseAnalyzer):
                 attack_list.append(f"{attack_id} - {attack_tactics}")
 
             # Temp set to deduplicate locations
-            matched_features_temp = set()
+            matched_features_temp: set = set()
 
             for match in rule_data.get("matches", []):
                 if len(match) > 1:

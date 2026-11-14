@@ -65,7 +65,7 @@ class BaseAnalyzer(ABC):
         pass
 
     @property
-    def plugin_id(self) -> str:
+    def plugin_id(self) -> str | None:
         # Optional: to look up tool path and plugin config in tools_config.json
         return None
 
@@ -106,7 +106,7 @@ class BaseAnalyzer(ABC):
 
     def get_plugin_dir(self, run_dir: str) -> str:
         # Helper to dynamically create and return this plugin's dedicated output folder
-        plugin_dir = os.path.join(run_dir, self.plugin_id)
+        plugin_dir = os.path.join(run_dir, str(self.plugin_id))
         os.makedirs(plugin_dir, exist_ok=True)
         return plugin_dir
 

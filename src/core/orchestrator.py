@@ -31,8 +31,8 @@ class Orchestrator:
     ):
         self.target_file = TargetFile(file_path, file_format)
         self.file_format = file_format.lower()
-        self.analyzers = []
-        self.reporters = []
+        self.analyzers: list = []
+        self.reporters: list = []
         self.workers = workers
         self.timeout = timeout
         self.runtime: RuntimeContext | None = None
@@ -80,7 +80,7 @@ class Orchestrator:
         if not hasattr(self, "_imported_module_names"):
             # Guard against re-importing the same plugin file, which would
             # create duplicate class objects and duplicate registrations.
-            self._imported_module_names = set()
+            self._imported_module_names: set = set()
 
         for file_path in file_paths:
             if file_path.name in ["__init__.py", "base_analyzer.py", "base_reporter.py"]:
@@ -93,6 +93,8 @@ class Orchestrator:
                     logger.debug(f"Plugin already imported, skipping: {file_path.name}")
                     continue
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"could not create import spec for {file_path}")
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 self._loaded_modules.append(module)
@@ -350,7 +352,7 @@ class Orchestrator:
         logger.info(f"Starting parallel analysis phase with {len(pending_analyzers)} analyzers...")
 
         # Tracks {Future_Object: Analyzer_Object}
-        running_futures = {}
+        running_futures: dict = {}
         # Tracks per-analyzer wall-clock start times
         analyzer_start_times = {}
         # Tracks plugin_ids that are done
