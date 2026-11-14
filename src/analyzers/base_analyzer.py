@@ -1,8 +1,23 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 import json
 import os
 import shutil
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class RuntimeContext:
+    """Immutable per-run context handed to analyzers via set_runtime().
+
+    Lets plugins reach paths, timeouts, and limits without changing the
+    public ``analyze()`` signature.
+    """
+    config_path: Path
+    run_dir: Path
+    project_root: Path
+    timeout: float = 300.0
+    limits: dict = field(default_factory=dict)
 
 
 def resolve_tool_path(tool_path: str) -> str | None:
@@ -45,6 +60,12 @@ class BaseAnalyzer(ABC):
         'any': Aggregate dependencies. At least ONE must be enabled. Will wait for all enabled ones to complete.
         """
         return {"all": [], "any": []}
+
+    # Per-run context; None until the orchestrator calls set_runtime().
+    runtime: RuntimeContext | None = None
+
+    def set_runtime(self, context: RuntimeContext) -> None:
+        self.runtime = context
 
     def get_plugin_dir(self, run_dir: str) -> str:
         #Helper to dynamically create and return this plugin's dedicated output folder

@@ -2,10 +2,12 @@ import logging
 import re
 import os
 import time
+from pathlib import Path
 import requests
-import json
 from collections import defaultdict
 from src.analyzers.base_analyzer import BaseAnalyzer
+from src.core.cache import cache_dir, read_json, write_json
+from src.core.paths import PROJECT_ROOT, resolve_path
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +20,32 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
     # (If QS isn't installed/enabled, the Orchestrator safely prunes it and runs this anyway)
     depends = {"all": [], "any": ["floss","quantumstrand"]}
 
+    def _tld_file_path(self, plugin_config) -> Path:
+        """Resolve the TLD list location.
+
+        A configured relative path is anchored to the project root (never the
+        caller's CWD); with no configuration the cache directory is used.
+        """
+        configured = plugin_config.get("tld_file")
+        if configured:
+            return resolve_path(configured)
+        return cache_dir() / "tlds.txt"
+
     def _update_tld_list(self, plugin_config):
-        #IANA TLD list updater
-        tld_file = plugin_config.get("tld_file", "./bin/tlds.txt")
+        #IANA TLD list updater.
+        # IMPORTANT: this never writes to tools_config.json. Update metadata
+        # lives in the cache dir; legacy keys in the config are read once as
+        # a freshness hint only.
+        tld_file = self._tld_file_path(plugin_config)
         freq_days = plugin_config.get("tldupdatefreqdays", 7)
-        last_update = plugin_config.get("tldupdatedon", 0)
-        local_version = plugin_config.get("tld_version", 0)
+
+        meta_path = cache_dir() / "tlds.meta.json"
+        meta = read_json(meta_path) or {}
+        last_update = meta.get("tldupdatedon", plugin_config.get("tldupdatedon", 0))
+        local_version = meta.get("tld_version", plugin_config.get("tld_version", 0))
         
         current_time = int(time.time())
-        file_exists = os.path.exists(tld_file)
+        file_exists = tld_file.exists()
         
         if not file_exists or (current_time - last_update) > (freq_days * 86400):
             logger.info("Checking IANA for TLD updates...")
@@ -40,24 +59,21 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
                         iana_version = int(version_match.group(1))
                         if iana_version > local_version or not file_exists:
                             tlds = [line.lower() for line in lines[1:] if line.strip() and not line.startswith("#")]
-                            with open(tld_file, "w") as f:
+                            with open(tld_file, "w", encoding="utf-8") as f:
                                 f.write("\n".join(tlds))
                             
-                            # Write updates back to tools_config.json
-                            with open("tools_config.json", "r") as f:
-                                master_config = json.load(f)
-                            
-                            master_config["plugins"][self.plugin_id]["tldupdatedon"] = current_time
-                            master_config["plugins"][self.plugin_id]["tld_version"] = max(iana_version, local_version)
-                            
-                            with open("tools_config.json", "w") as f:
-                                json.dump(master_config, f, indent=4)
+                            write_json(meta_path, {
+                                "tld_file": str(tld_file),
+                                "tldupdatedon": current_time,
+                                "tld_version": max(iana_version, local_version),
+                            })
+                            local_version = max(iana_version, local_version)
                                 
             except Exception as e:
                 logger.warning(f"Failed to fetch TLD updates: {e}")
 
-        if os.path.exists(tld_file):
-            with open(tld_file, "r") as f:
+        if tld_file.exists():
+            with open(tld_file, "r", encoding="utf-8") as f:
                 return [line.strip() for line in f if line.strip()]
         return ["com", "net", "org", "io", "xyz"] # Fallback
 

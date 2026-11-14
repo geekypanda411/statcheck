@@ -1,7 +1,12 @@
-"""Tests for config loading fallbacks and validation (Phase 2.4 extends this)."""
+"""Tests for config loading fallbacks and validation."""
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
+from src.core.config import ConfigError, validate_reporter_config, validate_tool_config
 from src.core.orchestrator import Orchestrator
 
 
@@ -37,3 +42,57 @@ def test_bin_path_resolved_to_absolute(tmp_path):
     cfg.write_text('{"bin_path": "./bin", "plugins": {}}')
     app = Orchestrator(str(tmp_path / "x.bin"), "pe", str(cfg), str(tmp_path / "nope.json"))
     assert str(app.bin_dir).startswith("/")
+
+
+# ------------------------------------------------------------- validation
+
+def test_validate_tool_config_accepts_valid_config():
+    config = {
+        "bin_path": "./bin",
+        "plugins": {"capa": {"enabled": True, "tool": "capa-v10.0.0-linux", "timeout": 120}},
+        "limits": {"max_resource_bytes": 1000},
+    }
+    assert validate_tool_config(config) == []
+
+
+def test_validate_tool_config_rejects_wrong_types():
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": "not-a-dict"})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": {"capa": "not-a-dict"}})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": {"capa": {"enabled": "yes"}}})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": {"capa": {"tool": 42}}})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": {"capa": {"timeout": "never"}}})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"bin_path": 123})
+
+
+def test_validate_tool_config_warns_on_unknown_keys():
+    warnings = validate_tool_config({"frobnicate": True, "plugins": {}})
+    assert any("frobnicate" in w for w in warnings)
+
+
+def test_validate_reporter_config_accepts_valid():
+    config = {
+        "reporters": {
+            "json_reporter": {"enabled": True, "output_template": ["fileinfo", "capa"]},
+        }
+    }
+    assert validate_reporter_config(config) == []
+
+
+def test_validate_reporter_config_rejects_wrong_types():
+    with pytest.raises(ConfigError):
+        validate_reporter_config({"reporters": {"json_reporter": {"output_template": "fileinfo"}}})
+    with pytest.raises(ConfigError):
+        validate_reporter_config({"reporters": {"json_reporter": {"enabled": 1}}})
+
+
+def test_orchestrator_rejects_invalid_config(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"plugins": {"capa": {"enabled": "true"}}}))
+    with pytest.raises(ConfigError):
+        Orchestrator(str(tmp_path / "x.bin"), "pe", str(bad), str(tmp_path / "nope.json"))

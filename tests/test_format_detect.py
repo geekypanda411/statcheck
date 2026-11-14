@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 from src.core.format_detect import detect_format
@@ -45,7 +43,6 @@ def test_cafebabe_disambiguated_as_macho_when_lief_parses(tmp_path, monkeypatch)
     f = tmp_path / "fat.macho"
     f.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 64)
 
-    import sys
 
     class FakeFatBinary:
         def __len__(self):
@@ -57,7 +54,6 @@ def test_cafebabe_disambiguated_as_macho_when_lief_parses(tmp_path, monkeypatch)
 
 
 def test_cafebabe_is_unknown_when_lief_recovers_nothing(tmp_path, monkeypatch):
-    import sys
 
     class EmptyFatBinary:
         def __len__(self):

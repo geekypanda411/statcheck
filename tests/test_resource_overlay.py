@@ -71,9 +71,11 @@ def _run_pe(analyzer, tmp_path, monkeypatch, entries, image, overlay=None, confi
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
-    fake = FakePE(entries, image, overlay=overlay, overlay_offset=len(image) - (len(overlay) if overlay else 0))
+    offset = len(image) - (len(overlay) if overlay else 0)
+    fake = FakePE(entries, image, overlay=overlay, overlay_offset=offset)
     monkeypatch.setattr("src.analyzers.resource_overlay_analyzer.pefile.PE", lambda data: fake)
-    monkeypatch.setattr("src.analyzers.resource_overlay_analyzer.lief", SimpleNamespace(ELF=SimpleNamespace(parse=lambda b: None)))
+    fake_lief = SimpleNamespace(ELF=SimpleNamespace(parse=lambda b: None))
+    monkeypatch.setattr("src.analyzers.resource_overlay_analyzer.lief", fake_lief)
 
     analyzer.analyze(target, tool_path="", plugin_config=config or {}, run_dir=str(run_dir))
     return target, run_dir

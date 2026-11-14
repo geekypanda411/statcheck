@@ -14,7 +14,6 @@ from src.analyzers.malwarebazaar_analyzer import MalwareBazaarAnalyzer
 from src.analyzers.vtcheck_analyzer import VirusTotalAnalyzer
 from src.core.target_file import TargetFile
 
-
 # ---------------------------------------------------------------- MalwareBazaar
 
 class FakeResponse:

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 class TargetFile:
     def __init__(self, file_path: str, file_format: str = "unknown"):
         self.path = Path(file_path)

@@ -1,0 +1,146 @@
+"""Tests for the IOC extractor: TLD update flow and regex extraction.
+
+No network: ``requests.get`` is monkeypatched. No repo writes: the cache dir
+is redirected into ``tmp_path`` and tools_config.json is verified to stay
+byte-identical.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from src.analyzers.iocextractor_analyzer import IOCExtractorAnalyzer
+from src.core.target_file import TargetFile
+
+IANA_BODY = "# Version 2026081400\ncom\nnet\norg\nevil\ngov\n"
+
+
+@pytest.fixture()
+def analyzer():
+    return IOCExtractorAnalyzer()
+
+
+@pytest.fixture()
+def fake_cache(tmp_path, monkeypatch):
+    import src.core.cache as cache
+
+    cache_location = tmp_path / "cache"
+    cache_location.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(cache, "cache_dir", lambda: cache_location)
+    # The analyzer imports the names directly; patch there too.
+    monkeypatch.setattr("src.analyzers.iocextractor_analyzer.cache_dir",
+                        lambda: cache_location)
+    return cache_location
+
+
+def _patch_iana(monkeypatch, body=IANA_BODY, status=200):
+    from src.analyzers import iocextractor_analyzer as ice
+
+    monkeypatch.setattr(
+        ice.requests, "get",
+        lambda url, timeout: SimpleNamespace(status_code=status, text=body),
+    )
+
+
+def test_tld_update_never_writes_tools_config(analyzer, fake_cache, monkeypatch, tmp_path):
+    """Regression: the old implementation wrote tldupdatedon back into
+    tools_config.json, corrupting concurrent runs."""
+    config_file = tmp_path / "tools_config.json"
+    config_payload = {
+        "bin_path": "./bin",
+        "plugins": {"iocextractor": {"tld_file": str(tmp_path / "tlds.txt")}},
+    }
+    import json
+
+    config_file.write_text(json.dumps(config_payload, indent=4))
+    before = config_file.read_bytes()
+
+    # Make the updater believe the list is stale.
+    monkeypatch.chdir(tmp_path)
+    plugin_config = {"tld_file": str(tmp_path / "tlds.txt"), "tldupdatedon": 0}
+
+    _patch_iana(monkeypatch)
+    tlds = analyzer._update_tld_list(plugin_config)
+
+    assert config_file.read_bytes() == before, "tools_config.json must never be modified at runtime"
+    assert "com" in tlds and "evil" in tlds
+    assert (tmp_path / "tlds.txt").exists()
+    # Freshness metadata moved to the cache dir, not the config.
+    assert (fake_cache / "tlds.meta.json").exists()
+
+
+def test_tld_list_reused_when_fresh(analyzer, fake_cache, monkeypatch, tmp_path):
+    from src.analyzers import iocextractor_analyzer as ice
+
+    tld_file = tmp_path / "tlds.txt"
+    tld_file.write_text("com\nnet\n")
+    (fake_cache / "tlds.meta.json").write_text(
+        '{"tldupdatedon": 9999999999, "tld_version": 1}'
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        ice.requests, "get",
+        lambda url, timeout: calls.append(url) or SimpleNamespace(status_code=200, text=IANA_BODY),
+    )
+    tlds = analyzer._update_tld_list({"tld_file": str(tld_file)})
+    assert tlds == ["com", "net"]
+    assert calls == [], "fresh TLD metadata must skip the network call"
+
+
+def test_default_tld_file_lives_in_cache_dir(analyzer, fake_cache):
+    path = analyzer._tld_file_path({})
+    assert path == fake_cache / "tlds.txt"
+
+
+def test_relative_tld_file_is_project_root_relative(analyzer, fake_cache):
+    from src.core.paths import PROJECT_ROOT
+
+    path = analyzer._tld_file_path({"tld_file": "./bin/tlds.txt"})
+    assert path == (PROJECT_ROOT / "bin" / "tlds.txt").resolve()
+
+
+def _run_extract(analyzer, tmp_path, strings_by_source):
+    target = TargetFile(str(tmp_path / "sample.bin"), "pe")
+    for source, strings in strings_by_source.items():
+        target.results["internal_context"][source] = {
+            "ioc_extractor_input": [{"string": s, "tags": tags} for s, tags in strings]
+        }
+    analyzer.analyze(target, tool_path="", plugin_config={
+        "tld_file": str(tmp_path / "fresh-tlds.txt"),
+    }, run_dir=str(tmp_path / "run"))
+    # Pre-seed the TLD list so no network is attempted.
+    (tmp_path / "fresh-tlds.txt").write_text("com\nnet\norg\nevil\n")
+    return target
+
+
+def test_ioc_extraction_extracts_urls_ips_domains(analyzer, fake_cache, monkeypatch, tmp_path):
+    # Fresh TLD metadata prevents any network access.
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
+    _patch_iana(monkeypatch)  # belt & braces
+
+    target = _run_extract(analyzer, tmp_path, {
+        "floss": [
+            ("http://evil.example.com/payload.bin", []),
+            ("Visit malware.evil.com", []),
+            ("C2 at 185.220.101.5", []),
+            ("deadbeef", []),
+        ],
+    })
+    summary = target.results["result_summary"]["iocextractor"]
+    assert "http://evil.example.com/payload.bin" in summary["regex_urls"]
+    assert "malware.evil.com" in summary["regex_domains"]
+    assert "185.220.101.5" in summary["regex_ip"]
+
+
+def test_ioc_extraction_ignores_tagged_strings(analyzer, fake_cache, monkeypatch, tmp_path):
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
+    target = _run_extract(analyzer, tmp_path, {
+        "floss": [
+            ("http://good.example.com/winapi-thing", ["#winapi"]),
+        ],
+    })
+    # #winapi-tagged strings are excluded by default ignore_tags.
+    assert "iocextractor" not in target.results["result_summary"]
