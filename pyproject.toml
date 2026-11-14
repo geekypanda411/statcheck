@@ -2,3 +2,25 @@
 name = "statcheck"
 version = "0.1"
 dependencies = []
+
+# Full packaging metadata lands in Phase 7; for now only the dev/test tool
+# configuration below is authoritative.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "bin", "reports", "test_binaries", "yara_rules"]
+
+[tool.ruff.lint]
+# Pragmatic initial selection; documented ignores can be tightened later.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Tighten module by module later; keep the initial gate pragmatic.
+check_untyped_defs = false
