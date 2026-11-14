@@ -131,23 +131,18 @@ class Orchestrator:
             yield cls
 
     def _analyzer_files(self, base_plugins_dir: str | Path) -> list:
+        """All analyzer files (global + every format subfolder).
+
+        Discovery is format-agnostic so that config validation and the
+        unknown-plugin-id warning see every plugin, not just the ones whose
+        folder matches the current format. Format routing happens through
+        each plugin's ``supported_formats`` at instantiation.
+        """
         file_ignore_list = ["__init__.py", "base_analyzer.py"]
         base_path = Path(base_plugins_dir)
 
-        global_plugins = list(base_path.glob("*.py"))
-
-        format_folder = base_path / self.file_format
-
-        if format_folder.exists():
-            format_plugins = list(format_folder.rglob("*.py"))
-        else:
-            logger.info(f"No analyzers found for file format {self.file_format}")
-            format_plugins = []
-
-        target_files = global_plugins + format_plugins
-
         upd_target_files = []
-        for target_file in target_files:
+        for target_file in base_path.rglob("*.py"):
             if target_file.name in file_ignore_list:
                 continue
             upd_target_files.append(target_file)
