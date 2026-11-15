@@ -55,7 +55,7 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = [".venv", "bin", "reports", "test_binaries", "yara_rules"]
+extend-exclude = [".venv", "bin", "reports", "test_binaries", "yara_rules","*.md", "docs/"]
 
 [tool.ruff.lint]
 # Pragmatic initial selection; documented ignores can be tightened later.
