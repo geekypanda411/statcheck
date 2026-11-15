@@ -47,6 +47,20 @@ file-processing pipeline.
 - **Decoupled reporting:** JSON and Markdown reporters, configurable through
   `reporter_config.json`.
 
+## How it works
+
+1. Load and validate configuration, then enforce `max_file_bytes` **before**
+   format detection or parser execution.
+2. Discover all analyzer plugins, route them by the detected/forced format, and
+   prune disabled or unsatisfiable dependency branches.
+3. Run independent analyzers concurrently. They publish compact summaries,
+   optional inter-plugin context, and raw artifacts under a unique run directory.
+4. Aggregate explicit plugin statuses, generate requested reports, and return a
+   nonzero exit for analyzer, scheduler, or reporter failures.
+
+The [architecture guide](docs/architecture.md) explains the execution diagram,
+DAG semantics, process lifecycle, caches, and design decisions in detail.
+
 ## Installation & setup
 
 Requires Python 3.11+.
@@ -122,12 +136,12 @@ statcheck sample.exe --workers 4 --timeout 120
 
 Useful flags: `--config`, `--reporter-config`, `--output-dir`, `--workers`,
 `--timeout`, `--debug`, `--log-file`, `--version`. Exit codes: `0` success,
-`1` runtime failure or any `failed`/`timeout`/`unavailable` analyzer, `2`
-usage/config error, `130` interrupted. Reports are still attempted after
-analyzer failures and are generated when all analyzers are disabled/pruned.
+`1` runtime failure (including analyzer, dependency-deadlock, or reporter
+failure), `2` usage/config error, `130` interrupted. Reports are still attempted
+after analyzer failures and are generated when all analyzers are disabled/pruned.
 
-Reports are written to `<output-dir>/<name>_<timestamp>_<uuid>/` and contain
-the summary report(s) plus one sub-directory of raw artifacts per plugin. The
+Reports are written to `<output-dir>/<name>_<timestamp>_<uuid>/`. Plugin raw
+artifact sub-directories are created on demand beneath that run directory. The
 UUID suffix prevents same-second run-directory collisions.
 
 ## Writing a plugin (analyzer)
@@ -159,7 +173,11 @@ class CustomAnalyzer(BaseAnalyzer):
             target_file.add_result(self.plugin_id, summary_data={"status": "unavailable", "reason": "tool not found"})
             return
         try:
-            result = run_tool([executable, str(target_file.path)], timeout=self.resolve_timeout(plugin_config))
+            result = run_tool(
+                [executable, str(target_file.path)],
+                timeout=self.resolve_timeout(plugin_config),
+                max_output_bytes=int(self.get_limit("max_tool_output_mb")) * 1024 * 1024,
+            )
         except ToolTimeout:
             raise  # Preserve the distinct orchestrator timeout status.
         except ToolError as e:
@@ -185,14 +203,15 @@ More details: [docs/plugin-api.md](docs/plugin-api.md),
 
 ## Documentation
 
-- [Configuration reference](docs/configuration.md)
-- [Architecture & DAG semantics](docs/architecture.md)
-- [Plugin API](docs/plugin-api.md)
-- [Report schema](docs/report-schema.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Security](docs/security.md)
-- [External tools](bin/README.md)
-- [Testdev review remediation checklist](docs/review-findings.md)
+- [Architecture & design decisions](docs/architecture.md) — lifecycle, DAG scheduling, concurrency, caching, and process safety
+- [Configuration reference](docs/configuration.md) — precedence, defaults, validation scope, limits, and network options
+- [Plugin API](docs/plugin-api.md) — complete analyzer example, helper contracts, and reporter API
+- [Report schema](docs/report-schema.md) — metadata, statuses, paths, field semantics, and determinism
+- [Security](docs/security.md) — trust boundaries, network inventory, sensitive artifacts, and isolation
+- [Troubleshooting](docs/troubleshooting.md) — diagnose statuses, exit codes, timeouts, paths, and missing reports
+- [External tools](bin/README.md) — provisioning, names, resources, and resolution checks
+- [Contributing](CONTRIBUTING.md) — development workflow and test requirements
+- [Testdev review remediation checklist](docs/review-findings.md) — completed review findings and verification record
 
 ## Roadmap
 

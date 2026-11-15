@@ -1,92 +1,228 @@
 # Plugin API
 
-## Analyzers
+Statcheck has two extension points: **analyzers** produce findings and
+**reporters** serialize run results. Both are discovered from Python files;
+there is no separate registration file.
 
-An analyzer is a subclass of `BaseAnalyzer` discovered from
-`src/analyzers/*.py` (cross-format) or `src/analyzers/<format>/*.py`.
+Before writing a plugin, read the [architecture guide](architecture.md) for the
+run lifecycle and dependency semantics.
 
-### Required attributes
+## Analyzer discovery
 
-| Attribute | Type | Description |
+Place a direct `BaseAnalyzer` subclass in:
+
+- `src/analyzers/` for cross-format or conventionally grouped analyzers; or
+- `src/analyzers/pe/` / `src/analyzers/elf/` for format-specific analyzers.
+
+Discovery recursively imports all analyzer files. The directory is organizational;
+`supported_formats` is the authoritative routing decision. `__init__.py` and
+`base_analyzer.py` are skipped, and each `plugin_id` must be unique.
+
+## Required class attributes
+
+| Attribute | Type | Purpose |
 |---|---|---|
-| `name` | `str` | Human-readable display name. |
-| `supported_formats` | `list[str]` | `"all"` or a subset of `pe`, `elf`, `macho`. |
-| `plugin_id` | `str` | Unique id; used for config lookup, dependencies, and output directories. |
+| `name` | `str` | Human-readable name used in logs and plugin listings. |
+| `plugin_id` | `str` | Stable unique ID used for config, dependencies, metadata, and artifact paths. |
+| `supported_formats` | `list[str]` | `["all"]` or a subset of `"pe"`, `"elf"`, `"macho"`. |
 
-### Optional attributes
+## Optional class attributes
 
-| Attribute | Default | Description |
+| Attribute | Default | Purpose |
 |---|---|---|
-| `depends` | `{"all": [], "any": []}` | DAG dependencies (see [architecture.md](architecture.md)). |
+| `depends` | `{"all": [], "any": []}` | IDs that must finish before this analyzer runs. |
+| `enabled_by_default` | `True` | Whether absence of `plugins.<id>.enabled` permits execution. Network-facing plugins should use `False`; explicit config still overrides either default. |
 
-### The `analyze()` method
+A dependency controls **ordering**, not success. Failed/unavailable dependencies
+still count as finished, so read inter-plugin context defensively. See
+[DAG execution](architecture.md#6-dag-execution).
+
+## The `analyze()` method
 
 ```python
-def analyze(self, target_file, tool_path, plugin_config, run_dir): ...
+def analyze(self, target_file, tool_path, plugin_config, run_dir):
+    ...
 ```
 
-- `target_file` - `TargetFile` (path, format, results, cached bytes via
-  `target_file.read_bytes()`).
-- `tool_path` - resolved default tool path (`<bin_path>/<tool or plugin_id>`).
-  Use `resolve_tool_path(tool_path)` to resolve it to an existing executable.
-- `plugin_config` - the plugin's `tools_config.json` block.
-- `run_dir` - absolute run output directory.
-
-### BaseAnalyzer helpers
-
-| Helper | Description |
+| Argument | Contents |
 |---|---|
-| `resolve_tool_path(tool_path)` | Module function: configured path, then PATH lookup, else `None`. |
-| `run_tool(cmd, timeout=...)` | Module function (`src.core.process`): subprocess with timeout, raises `ToolTimeout`/`ToolError`. |
-| `self.resolve_timeout(plugin_config)` | `plugin_config["timeout"]` or the runtime default. |
-| `self.get_limit(key)` | Resolved limit (config `limits` over defaults). |
-| `self.get_plugin_dir(run_dir)` | Creates/returns `<run_dir>/<plugin_id>/`. |
-| `self.save_raw(run_dir, filename, data)` | Writes raw JSON (size-capped) and returns a **run-dir-relative** path. |
-| `self.set_runtime(context)` | Called by the orchestrator; `self.runtime` exposes paths/timeout/limits. |
+| `target_file` | `TargetFile` with `path`, `filename`, `format`, `results`, and synchronized `read_bytes()` / `read_mmap()` helpers. |
+| `tool_path` | Candidate formed as `<bin_path>/<plugin tool or plugin_id>`. It is not guaranteed to exist. |
+| `plugin_config` | This analyzer's `plugins.<plugin_id>` object, or `{}`. Validate plugin-specific values before use. |
+| `run_dir` | Unique directory for this run's outputs. It preserves a relative `--output-dir`; call `Path(run_dir).resolve()` when an absolute path is required. |
 
-### Publishing results
+Immediately before submission, the orchestrator calls `set_runtime()`.
+`self.runtime` is a `RuntimeContext` containing:
+
+- `config_path`: resolved active tool-config path;
+- `run_dir`: the same run directory as a `Path`;
+- `project_root`: base used for project-relative resources;
+- `timeout`: CLI/runtime default timeout;
+- `limits`: configured global limits.
+
+This preserves the historical `analyze()` signature while giving plugins access
+to run-specific policy.
+
+## Helpers
+
+| Helper | Contract |
+|---|---|
+| `resolve_tool_path(tool_path)` | Return the configured executable if present/executable, then try its basename on `PATH`, otherwise return `None`. |
+| `run_tool(cmd, timeout=..., max_output_bytes=...)` | Run an external tool with process-tree cleanup and bounded stdout/stderr. Raises `ToolTimeout`, `ToolError`, or process-creation `OSError`. |
+| `self.resolve_timeout(plugin_config)` | Resolve plugin `timeout`, then the runtime default, then 300 seconds. |
+| `self.get_limit(key)` | Resolve a configured global limit over built-in defaults. |
+| `self.get_plugin_dir(run_dir)` | Create and return `<run_dir>/<plugin_id>/`. |
+| `self.save_raw(run_dir, filename, data)` | Serialize raw JSON with a configured size guard and return a run-relative path. Use a trusted fixed filename. |
+| `self.set_runtime(context)` | Called by the orchestrator; plugins normally read `self.runtime`, not this method. |
+
+For external tools, pass the configured output limit explicitly:
+
+```python
+max_output_bytes = int(self.get_limit("max_tool_output_mb")) * 1024 * 1024
+result = run_tool(command, timeout=timeout, max_output_bytes=max_output_bytes)
+```
+
+`run_tool()` has its own 512 MiB fallback, but passing the runtime value ensures
+that user configuration is respected.
+
+## Complete external-tool analyzer example
+
+```python
+import json
+
+from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
+from src.core.process import ToolError, ToolTimeout, run_tool
+
+
+class CustomAnalyzer(BaseAnalyzer):
+    name = "Custom Tool Analyzer"
+    plugin_id = "custom_tool"
+    supported_formats = ["all"]
+    depends = {"all": [], "any": []}
+
+    def analyze(self, target_file, tool_path, plugin_config, run_dir):
+        executable = resolve_tool_path(tool_path)
+        if executable is None:
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={"status": "unavailable", "reason": "tool not found"},
+            )
+            return
+
+        try:
+            result = run_tool(
+                [executable, str(target_file.path)],
+                timeout=self.resolve_timeout(plugin_config),
+                max_output_bytes=int(self.get_limit("max_tool_output_mb")) * 1024 * 1024,
+            )
+            raw_data = json.loads(result.stdout)
+        except ToolTimeout:
+            # ToolTimeout subclasses ToolError; re-raise it first so the
+            # orchestrator records "timeout" rather than "unavailable".
+            raise
+        except (ToolError, json.JSONDecodeError) as error:
+            target_file.add_result(
+                self.plugin_id,
+                summary_data={"status": "unavailable", "reason": str(error)},
+            )
+            return
+
+        raw_path = self.save_raw(run_dir, "custom_tool_raw_output.json", raw_data)
+        target_file.add_result(
+            self.plugin_id,
+            summary_data={
+                "status": "analyzed",
+                "findings": raw_data.get("findings", []),
+                "raw_output_path": raw_path,
+            },
+            internal_context_data={
+                "custom_input": raw_data.get("downstream_strings", []),
+            },
+        )
+```
+
+Process-creation errors and programming bugs should generally propagate. The
+orchestrator records them as `failed` with a traceback rather than disguising
+them as an unavailable tool.
+
+## Publishing results
+
+Use `TargetFile.add_result()` for both public findings and downstream context:
 
 ```python
 target_file.add_result(
     self.plugin_id,
-    summary_data={...},  # goes to result_summary
-    internal_context_data={...},  # goes to internal_context (inter-plugin)
+    summary_data={"finding_count": 2},          # -> result_summary
+    internal_context_data={"strings": [...]},  # -> internal_context
 )
-target_file.set_plugin_status(plugin_id, status, error=None, duration_ms=None)
 ```
 
-`add_result` only accepts `summary_data` / `internal_context_data`; anything
-else raises `TypeError` (a historical `complete_data=` kwarg once crashed
-plugins - raw output now goes through `save_raw`).
+Only `summary_data` and `internal_context_data` are accepted. Raw payloads belong
+in files created by `save_raw()`, not in `internal_context` or oversized report
+sections.
 
-### Conventions
+### Status ownership
 
-1. **Availability**: when the external tool is missing, publish
-   `{"status": "unavailable", "reason": ...}` instead of returning silently.
-2. **Timeouts**: never call `subprocess.run` directly; use `run_tool` and let
-   `ToolTimeout` propagate. If handling `ToolError`, catch and re-raise its
-   subclass `ToolTimeout` first so timeouts keep their distinct status.
-3. **Paths**: every path stored in a summary must be run-dir-relative
-   (use `save_raw` / `os.path.relpath`).
-4. **Determinism**: convert sets to `sorted(...)`, never `list(set(...))`.
-5. **Limits**: cap unbounded lists with `self.get_limit(...)`.
-6. **Exceptions**: catch only expected I/O/tool errors; let programming
-   errors propagate so the orchestrator records `failed` with a traceback.
-
-## Reporters
-
-A reporter subclasses `BaseReporter` in `src/reporters/`:
-
-| Attribute | Description |
-|---|---|
-| `name` | Display name. |
-| `format_id` | Value matched against `--report` (e.g. `json`, `markdown`). |
-| `reporter_id` | Key used in `reporter_config.json`. |
+The orchestrator assigns final `metadata.plugins.<id>` status **after**
+`analyze()` finishes. Plugins should publish status in their summary and should
+not try to override final plugin metadata themselves:
 
 ```python
-def generate(self, target_file, run_dir, reporter_config, timestamp): ...  # write files into run_dir
+{"status": "unavailable", "reason": "executable not found"}
 ```
 
-`reporter_config` is the plugin's reporter_config block (e.g.
-`output_template`). Reporters are selected with `--report <format_id> ...`
-or `--report all`, and disabled via `reporter_config.json`.
+`failed`, `timeout`, and `unavailable` summary statuses are promoted to metadata;
+`reason` or `details` becomes the metadata error. Other statuses and a missing
+summary normally produce metadata status `completed`.
+
+## Analyzer implementation rules
+
+1. **Availability:** publish `unavailable` with an actionable `reason` for
+   expected missing tools, invalid tool output, missing API keys, or unsupported
+   input that prevents analysis.
+2. **Timeouts:** use `run_tool()` and let `ToolTimeout` propagate. Catch it before
+   `ToolError` if both are handled.
+3. **Output limits:** pass `max_tool_output_mb` to `run_tool()` and cap unbounded
+   lists using `get_limit()`. Sort before taking a deterministic slice.
+4. **Artifact paths:** write beneath `run_dir`; publish only run-relative paths.
+   For names derived from samples, sanitize every component and verify the
+   resolved path remains beneath the intended extraction directory.
+5. **Determinism:** convert sets using `sorted(...)`, not `list(set(...))`. Merge
+   concurrent inputs before sorting and applying limits.
+6. **Exceptions:** catch expected tool/parse/I/O errors deliberately. Let
+   unexpected exceptions propagate so failures remain visible.
+7. **Concurrency:** assume independent analyzers run simultaneously. Use unique
+   plugin IDs/artifact paths and read shared context only after dependencies
+   finish.
+
+## Reporter API
+
+Place a direct `BaseReporter` subclass in `src/reporters/` with:
+
+| Attribute | Purpose |
+|---|---|
+| `name` | Human-readable name. |
+| `format_id` | Value matched by `--report`, such as `json` or `markdown`. |
+| `reporter_id` | Key in `reporter_config.json`, such as `json_reporter`. |
+
+Implement:
+
+```python
+def generate(self, target_file, run_dir, reporter_config, timestamp):
+    ...
+```
+
+- `target_file.results` contains metadata and public summaries.
+- `run_dir` is the unique output directory for this run.
+- `reporter_config` is this reporter's block from `reporter_config.json`.
+- `timestamp` is the run token; the current orchestrator supplies the string
+  `<unix-ts>_<uuid>`. Treat it as an opaque filename component.
+
+`--report` chooses formats to load, and the reporter config can disable one
+independently. Propagate write and serialization exceptions: the orchestrator
+logs them, attempts remaining reporters, and returns failure rather than silently
+claiming success.
+
+See `src/reporters/json_reporter.py` for canonical JSON serialization and
+`src/reporters/markdown_reporter.py` for a second implementation of the same
+contract.
