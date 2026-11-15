@@ -6,6 +6,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 
 # Python build artifacts
 build/
