@@ -14,7 +14,10 @@ USER statcheck
 WORKDIR /work
 
 COPY --chown=statcheck:statcheck . /opt/statcheck
-RUN pip install --user --no-cache-dir /opt/statcheck
+# Keep /opt/statcheck as the project root so default config/tool/rule paths
+# resolve there. The real config is gitignored, so create it from the example.
+RUN cp /opt/statcheck/tools_config.json.example /opt/statcheck/tools_config.json \
+    && pip install --user --no-cache-dir -e /opt/statcheck
 ENV PATH="/home/statcheck/.local/bin:${PATH}"
 
 # Mount your samples and rules:

@@ -5,6 +5,7 @@
         "max_resource_bytes": 104857600,
         "max_total_extracted_bytes": 1073741824,
         "max_raw_json_mb": 512,
+        "max_tool_output_mb": 512,
         "max_summary_items": 10000,
         "max_strings": 1000000,
         "max_ioc_text_mb": 64,

@@ -110,9 +110,9 @@ def _run_extract(analyzer, tmp_path, strings_by_source, config=None):
     plugin_config = {"tld_file": str(tmp_path / "fresh-tlds.txt")}
     if config:
         plugin_config.update(config)
-    analyzer.analyze(target, tool_path="", plugin_config=plugin_config, run_dir=str(tmp_path / "run"))
     # Pre-seed the TLD list so no network is attempted.
     (tmp_path / "fresh-tlds.txt").write_text("com\nnet\norg\nevil\n")
+    analyzer.analyze(target, tool_path="", plugin_config=plugin_config, run_dir=str(tmp_path / "run"))
     return target
 
 
@@ -137,6 +137,33 @@ def test_ioc_extraction_extracts_urls_ips_domains(analyzer, fake_cache, monkeypa
     assert "http://evil.example.com/payload.bin" in summary["regex_urls"]
     assert "malware.evil.com" in summary["regex_domains"]
     assert "185.220.101.5" in summary["regex_ip"]
+
+
+def test_domain_boundaries_do_not_drop_iocs_or_match_longer_domains(analyzer, fake_cache, tmp_path):
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
+    samples = [
+        "c2-path.evil.com/path",
+        "c2-period.evil.com.",
+        "c2-query.evil.com?x=1",
+        '"c2-quote.evil.com"',
+        "c2-fragment.evil.com#tag",
+        "c2-port.evil.com:8080",
+        "c2-space.evil.com now",
+        "unknown.evil.com.invalid",
+    ]
+    target = _run_extract(analyzer, tmp_path, {"floss": [(sample, []) for sample in samples]})
+
+    summary = target.results["result_summary"]["iocextractor"]
+    assert set(summary["regex_domains"]) == {
+        "c2-path.evil.com",
+        "c2-period.evil.com",
+        "c2-query.evil.com",
+        "c2-quote.evil.com",
+        "c2-fragment.evil.com",
+        "c2-port.evil.com",
+        "c2-space.evil.com",
+    }
+    assert "c2-path.evil.com/path" not in summary.get("regex_unixfilepath", [])
 
 
 def test_ioc_extraction_ignores_tagged_strings(analyzer, fake_cache, monkeypatch, tmp_path):
@@ -175,6 +202,50 @@ def test_domain_followed_by_punctuation_is_extracted(analyzer, fake_cache, monke
     )
     assert "c2.evil.com" in summary["regex_domains"]
     assert "c2backup.evil.com" in summary["regex_domains"]
+
+
+def test_domain_followed_by_whitespace_or_port_is_extracted(analyzer, fake_cache, tmp_path):
+    summary = _extract_strings(
+        analyzer,
+        fake_cache,
+        tmp_path,
+        [
+            "connect to c2-space.evil.com then sleep",
+            "connect to c2-port.evil.com:8443 for commands",
+        ],
+    )
+    assert summary["regex_domains"] == ["c2-port.evil.com", "c2-space.evil.com"]
+
+
+def test_string_cap_is_independent_of_producer_order(analyzer, fake_cache, monkeypatch, tmp_path):
+    (fake_cache / "tlds.meta.json").write_text('{"tldupdatedon": 9999999999, "tld_version": 1}')
+    original_get_limit = analyzer.get_limit
+    monkeypatch.setattr(
+        analyzer,
+        "get_limit",
+        lambda key, default=None: 2 if key == "max_strings" else original_get_limit(key, default),
+    )
+
+    forward = _run_extract(
+        analyzer,
+        tmp_path,
+        {
+            "floss": [("z.evil.com", []), ("a.evil.com", [])],
+            "quantumstrand": [("m.evil.com", []), ("b.evil.com", [])],
+        },
+    )
+    reversed_order = _run_extract(
+        analyzer,
+        tmp_path,
+        {
+            "quantumstrand": [("b.evil.com", []), ("m.evil.com", [])],
+            "floss": [("a.evil.com", []), ("z.evil.com", [])],
+        },
+    )
+
+    expected = {"regex_domains": ["a.evil.com", "b.evil.com"]}
+    assert forward.results["result_summary"]["iocextractor"] == expected
+    assert reversed_order.results["result_summary"]["iocextractor"] == expected
 
 
 def test_known_false_positives_are_not_iocs(analyzer, fake_cache, monkeypatch, tmp_path):

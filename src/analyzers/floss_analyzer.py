@@ -2,7 +2,7 @@ import json
 import logging
 
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
-from src.core.process import ToolError, run_tool
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +35,18 @@ class FlossAnalyzer(BaseAnalyzer):
 
         timeout = self.resolve_timeout(plugin_config)
         max_strings = int(self.get_limit("max_strings"))
+        max_output_bytes = int(self.get_limit("max_tool_output_mb")) * 1024 * 1024
 
         # RUN FLOSS SUBPROCESS (ToolTimeout propagates to the orchestrator so
         # the run metadata records a 'timeout' status for this plugin.)
         try:
             result = run_tool(
-                [executable, "-j", "-q", "-n", str(min_length_string), str(target_file.path)], timeout=timeout
+                [executable, "-j", "-q", "-n", str(min_length_string), str(target_file.path)],
+                timeout=timeout,
+                max_output_bytes=max_output_bytes,
             )
+        except ToolTimeout:
+            raise
         except ToolError as e:
             logger.error(f"FLOSS execution failed: {e}")
             target_file.add_result(

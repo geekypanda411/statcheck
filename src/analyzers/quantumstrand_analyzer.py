@@ -38,12 +38,15 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
 
         timeout = self.resolve_timeout(plugin_config)
         max_strings = int(self.get_limit("max_strings"))
+        max_output_bytes = int(self.get_limit("max_tool_output_mb")) * 1024 * 1024
 
         # RUN QS SUBPROCESS (ToolTimeout propagates to the orchestrator so the
         # run metadata records a 'timeout' status for this plugin.)
         try:
             result = run_tool(
-                [executable, "-j", "-q", "-n", str(min_string_length), str(target_file.path)], timeout=timeout
+                [executable, "-j", "-q", "-n", str(min_string_length), str(target_file.path)],
+                timeout=timeout,
+                max_output_bytes=max_output_bytes,
             )
         except ToolTimeout:
             # Let timeouts propagate so the orchestrator records a
@@ -131,7 +134,8 @@ class QuantumStrandAnalyzer(BaseAnalyzer):
         # FORMAT FOR IOC EXTRACTOR & SUMMARY
         ioc_extractor_input = []
 
-        for string_val, tags_set in deduped_strings.items():
+        for string_val in sorted(deduped_strings):
+            tags_set = deduped_strings[string_val]
             # 1. Format the Pub/Sub contract for the IOC Extractor
             ioc_extractor_input.append({"string": string_val, "tags": sorted(tags_set)})
 

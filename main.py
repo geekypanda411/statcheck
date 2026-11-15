@@ -1,5 +1,6 @@
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -97,12 +98,35 @@ def _run(args, logger) -> int:
                 print(f"  {plugin_id:<20} {status:<8} tool: {tool}")
         return 0
 
+    if args.workers < 1:
+        logger.error("--workers must be at least 1")
+        return 2
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        logger.error("--timeout must be a finite number greater than 0")
+        return 2
+
     if not args.file:
         print("error: the 'file' argument is required unless --list-plugins is used", file=sys.stderr)
         return 2
 
     if not Path(args.file).is_file():
         logger.error(f"File not found: {args.file}")
+        return 1
+
+    # Load configuration and enforce the input guard before auto-detection can
+    # pass ambiguous inputs to a complex parser such as LIEF.
+    app = Orchestrator(
+        args.file,
+        "unknown" if args.format == "auto" else args.format,
+        config_path=args.config,
+        reporter_config_path=args.reporter_config,
+        workers=args.workers,
+        timeout=args.timeout,
+    )
+    try:
+        app.enforce_input_limit()
+    except ValueError as e:
+        logger.error(str(e))
         return 1
 
     if args.format == "auto":
@@ -117,15 +141,8 @@ def _run(args, logger) -> int:
         final_format = args.format
         logger.info(f"Manually selected format: {final_format} for file {args.file}")
 
-    # Setup Orchestrator (defaults anchored to the project root, not CWD)
-    app = Orchestrator(
-        args.file,
-        final_format,
-        config_path=args.config,
-        reporter_config_path=args.reporter_config,
-        workers=args.workers,
-        timeout=args.timeout,
-    )
+    app.file_format = final_format
+    app.target_file.format = final_format
 
     # Load Analyzers
     logger.debug("Loading analyzers...")
@@ -152,7 +169,10 @@ def _run(args, logger) -> int:
     reports_dir = Path(args.output_dir)
     reports_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Starting analysis and report generation...")
-    app.execute(str(reports_dir))
+    succeeded = app.execute(str(reports_dir))
+    if not succeeded:
+        logger.error("Analysis or report generation completed with failures.")
+        return 1
     logger.info("Analysis and report generation completed successfully.")
     return 0
 

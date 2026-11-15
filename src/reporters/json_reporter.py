@@ -82,16 +82,9 @@ class JsonReporter(BaseReporter):
             "result_summary": order_results(target_file.results.get("result_summary", {})),
         }
 
-        try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(final_ordered_results, f, indent=4, default=_json_default)
+        # Let write/serialization failures propagate. The orchestrator must be
+        # able to report an unsuccessful run instead of silently returning 0.
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(final_ordered_results, f, indent=4, default=_json_default)
 
-            logger.info(f"Successfully generated JSON report at: {output_path}")
-
-        except PermissionError:
-            logger.error(f"Permission denied: Could not write JSON report to {output_path}")
-        except Exception as e:
-            # for any unexpected file I/O or serialization errors
-            logger.exception(
-                f"An unexpected error occurred while generating JSON report for {target_file.filename} : {e}"
-            )
+        logger.info(f"Successfully generated JSON report at: {output_path}")

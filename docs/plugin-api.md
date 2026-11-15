@@ -64,7 +64,8 @@ plugins - raw output now goes through `save_raw`).
 1. **Availability**: when the external tool is missing, publish
    `{"status": "unavailable", "reason": ...}` instead of returning silently.
 2. **Timeouts**: never call `subprocess.run` directly; use `run_tool` and let
-   `ToolTimeout` propagate.
+   `ToolTimeout` propagate. If handling `ToolError`, catch and re-raise its
+   subclass `ToolTimeout` first so timeouts keep their distinct status.
 3. **Paths**: every path stored in a summary must be run-dir-relative
    (use `save_raw` / `os.path.relpath`).
 4. **Determinism**: convert sets to `sorted(...)`, never `list(set(...))`.

@@ -132,10 +132,13 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
                     # .update() merges tags from FLOSS ([]) and QS (["#code"]) flawlessly
                     master_tags_dict[s_val].update(item.get("tags", []))
 
-        master_string_pool = []
-        for s_val, merged_tags in master_tags_dict.items():
-            if not any(tag in ignore_tags for tag in merged_tags):
-                master_string_pool.append(s_val)
+        # Sort the merged pool before applying any caps so producer completion
+        # order cannot change which strings are retained.
+        master_string_pool = sorted(
+            s_val
+            for s_val, merged_tags in master_tags_dict.items()
+            if not any(tag in ignore_tags for tag in merged_tags)
+        )
 
         if not master_string_pool:
             logger.info("No published strings found for extraction.")
@@ -208,13 +211,15 @@ class IOCExtractorAnalyzer(BaseAnalyzer):
         if plugin_config.get("exclude_private_ips", False):
             raw_ips = [ip for ip in raw_ips if not self._is_private_ip(ip)]
 
-        # Domains (Positive lookahead ensures it ends at string boundary, slash, or colon)
-        # - Negative lookbehind (?<![/\\]) ensures we don't accidentally rip "file.zip" out of a filepath
-        # - Positive lookahead (_END) ensures it ends cleanly at punctuation or line end
+        # Accept normal delimiters (ports, paths, queries, quotes, whitespace,
+        # and sentence punctuation) without matching a prefix of a longer or
+        # unknown domain. A trailing sentence period is allowed, but the dot in
+        # "evil.com.evil" prevents a partial "evil.com" match.
+        domain_end = r"(?=$|[^a-zA-Z0-9_.-]|\.(?:$|[^a-zA-Z0-9_-]))"
         tld_pattern = self._build_tld_pattern(tld_list)
         domain_regex = re.compile(
             rf"(?i)(?<![/\\])\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{{0,61}}[a-zA-Z0-9])?\.)+"
-            rf"(?:{tld_pattern}){_END}",
+            rf"(?:{tld_pattern}){domain_end}",
             re.ASCII,
         )
         raw_domains = sorted(set(d.lower() for d in domain_regex.findall(massive_text_block)))

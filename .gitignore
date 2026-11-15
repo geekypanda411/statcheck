@@ -7,6 +7,10 @@ __pycache__/
 *.so
 .Python
 
+# Python build artifacts
+build/
+*.egg-info/
+
 #Python Virtual Env
 venv/
 .venv/
@@ -32,6 +36,7 @@ test_binaries/
 #Prevent commiting binaries
 bin/*
 !bin/.gitkeep
+!bin/README.md
 !bin/die_db/
 
 #Prevent Commiting test reports

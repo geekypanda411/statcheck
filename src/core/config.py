@@ -7,6 +7,8 @@ orchestrator can log them without aborting the run.
 
 from __future__ import annotations
 
+import math
+
 
 class ConfigError(ValueError):
     """Raised when a configuration file has an invalid structure/type."""
@@ -50,6 +52,8 @@ def validate_tool_config(config: dict) -> list[str]:
             timeout = plugin_config.get("timeout")
             if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
                 raise ConfigError(f"plugins.{plugin_id}.timeout must be a number, got {type(timeout).__name__}")
+            if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+                raise ConfigError(f"plugins.{plugin_id}.timeout must be a finite number greater than zero")
 
     limits = config.get("limits")
     if limits is not None:
@@ -57,6 +61,8 @@ def validate_tool_config(config: dict) -> list[str]:
         for key, value in limits.items():
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise ConfigError(f"limits.{key} must be a number, got {type(value).__name__}")
+            if not math.isfinite(value) or value <= 0:
+                raise ConfigError(f"limits.{key} must be a finite number greater than zero")
 
     return warnings
 

@@ -115,3 +115,47 @@ def test_ioc_extraction_deterministic_under_random_hashseed(tmp_path):
         outputs.append(result.stdout)
 
     assert outputs[0] == outputs[1] == outputs[2], "output differs across PYTHONHASHSEED values"
+
+
+def test_ioc_cap_is_stable_across_hashseeds_and_reversed_producers(tmp_path):
+    """The lexicographically first IOC inputs survive regardless of merge order."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = tmp_path / "capped_extract.py"
+    script.write_text(
+        "import json, sys\n"
+        "sys.path.insert(0, {root!r})\n"
+        "from src.core.target_file import TargetFile\n"
+        "from src.analyzers.iocextractor_analyzer import IOCExtractorAnalyzer\n"
+        "strings = ['z.evil.com', 'a.evil.com', 'm.evil.com', 'b.evil.com']\n"
+        "sources = [('floss', strings[:2]), ('quantumstrand', strings[2:])]\n"
+        "if sys.argv[1] == 'reverse': sources = [(name, list(reversed(items))) for name, items in sources[::-1]]\n"
+        "target = TargetFile('sample.exe', 'pe')\n"
+        "for name, items in sources:\n"
+        "    target.results['internal_context'][name] = {{\n"
+        "        'ioc_extractor_input': [{{'string': value, 'tags': []}} for value in items]}}\n"
+        "analyzer = IOCExtractorAnalyzer()\n"
+        "analyzer._update_tld_list = lambda config: ['com', 'net', 'evil']\n"
+        "limits = {{'max_strings': 2, 'max_ioc_text_mb': 64, 'max_summary_items': 10000}}\n"
+        "analyzer.get_limit = lambda key, default=None: limits.get(key, default)\n"
+        "analyzer.analyze(target, '', {{}}, {run!r})\n"
+        "print(json.dumps(target.results['result_summary']['iocextractor'], sort_keys=True))\n".format(
+            root=str(Path(__file__).resolve().parents[1]), run=str(tmp_path / "run")
+        )
+    )
+
+    outputs = []
+    for index, seed in enumerate(("0", "1", "random")):
+        env = dict(os.environ, PYTHONHASHSEED=seed, XDG_CACHE_HOME=str(tmp_path / "cache"))
+        order = "reverse" if index % 2 else "forward"
+        result = subprocess.run(
+            [sys.executable, str(script), order], capture_output=True, text=True, env=env, timeout=60
+        )
+        assert result.returncode == 0, result.stderr
+        outputs.append(result.stdout)
+
+    assert outputs[0] == outputs[1] == outputs[2]
+    assert json.loads(outputs[0]) == {"regex_domains": ["a.evil.com", "b.evil.com"]}

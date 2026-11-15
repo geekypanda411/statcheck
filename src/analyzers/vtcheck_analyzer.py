@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class VirusTotalAnalyzer(BaseAnalyzer):
     name = "VirusTotal TI Lookup"
     supported_formats = ["all"]
+    enabled_by_default = False
     plugin_id = "vtlookup"
     depends = {"all": ["fileinfo"], "any": []}
 
@@ -21,7 +22,9 @@ class VirusTotalAnalyzer(BaseAnalyzer):
         api_key = os.environ.get(env_var_name)
 
         if not api_key:
+            reason = f"API key environment variable '{env_var_name}' is not set."
             logger.error(f"{self.name} is enabled, but '{env_var_name}' is missing!")
+            target_file.add_result(self.plugin_id, summary_data={"status": "unavailable", "reason": reason})
             return
 
         summary = target_file.results.get("result_summary", {})

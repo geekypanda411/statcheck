@@ -7,10 +7,11 @@ import re
 import sys
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 from src.analyzers.base_analyzer import BaseAnalyzer, RuntimeContext
-from src.core.config import validate_reporter_config, validate_tool_config
+from src.core.config import ConfigError, validate_reporter_config, validate_tool_config
 from src.core.paths import PROJECT_ROOT, resolve_path
 from src.core.process import ToolTimeout
 from src.core.target_file import TargetFile
@@ -68,11 +69,13 @@ class Orchestrator:
 
     def _load_config(self, config_path: str, default: dict) -> dict:
         if os.path.exists(config_path):
-            with open(config_path) as f:
-                return json.load(f)
-        else:
-            logger.warning(f"Config file {config_path} not found. Using defaults.")
-            return default
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                raise ConfigError(f"Invalid JSON in {config_path}: {e}") from e
+        logger.warning(f"Config file {config_path} not found. Using defaults.")
+        return default
 
     def _import_plugin_files(self, file_paths: list):
         if not hasattr(self, "_loaded_modules"):
@@ -259,16 +262,33 @@ class Orchestrator:
             text = text[:max_length] + "\n... (truncated)"
         return text
 
-    def execute(self, report_dir: str):
+    def enforce_input_limit(self) -> None:
+        """Reject oversized targets before format parsing or analyzer execution."""
+        max_file_bytes = int(self.config.get("limits", {}).get("max_file_bytes", 2 * 1024**3))
+        target_size = self.target_file.path.stat().st_size
+        if target_size > max_file_bytes:
+            raise ValueError(
+                f"Input file is {target_size} bytes, exceeding max_file_bytes ({max_file_bytes}). "
+                "No format parsing, analysis, or external tool execution was started."
+            )
+
+    def execute(self, report_dir: str) -> bool:
+        """Run analysis/reporting and return whether the run fully succeeded."""
         logger.info("Pre-Processing analyzer dependencies..")
 
         run_started_at = time.time()
+        self.enforce_input_limit()
+        # An Orchestrator can be reused programmatically; no summaries,
+        # statuses, or cached bytes may leak between independent runs.
+        self.target_file.reset()
 
-        # --- Create Unified Run Directory ---
-        self.timestamp = int(run_started_at)
+        # Seconds alone allow same-name runs to overwrite one another. A UUID
+        # suffix keeps paths readable while making every run directory unique.
+        seconds = int(run_started_at)
+        self.timestamp = f"{seconds}_{uuid.uuid4().hex}"
         clean_name = re.sub(r"[^a-zA-Z0-9.-]+", "_", self.target_file.filename)
         self.run_dir = os.path.join(report_dir, f"{clean_name}_{self.timestamp}")
-        os.makedirs(self.run_dir, exist_ok=True)
+        os.makedirs(self.run_dir, exist_ok=False)
         logger.info(f"Created Unified Run Directory: {self.run_dir}")
 
         # --- Record run metadata ---
@@ -293,7 +313,7 @@ class Orchestrator:
         active_plugin_ids = set()
         for analyzer in self.analyzers:
             plugin_config = self.config.get("plugins", {}).get(analyzer.plugin_id, {})
-            if plugin_config.get("enabled", True):
+            if plugin_config.get("enabled", getattr(analyzer, "enabled_by_default", True)):
                 active_plugin_ids.add(analyzer.plugin_id)
             else:
                 logger.info(f"Analyzer Disabled by Config: {analyzer.name}")
@@ -337,12 +357,7 @@ class Orchestrator:
         pending_analyzers = [a for a in self.analyzers if a.plugin_id in active_plugin_ids]
 
         if not pending_analyzers:
-            logger.warning("No analyzers are enabled or have satisfied dependencies. Exiting analysis phase.")
-            run_metadata = self.target_file.results["metadata"]["run"]
-            run_metadata["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-            run_metadata["duration_ms"] = round((time.time() - run_started_at) * 1000, 1)
-            self.target_file.results["metadata"]["analyzed_by"] = []
-            return
+            logger.warning("No analyzers are enabled or have satisfied dependencies. Generating status-only reports.")
 
         logger.info(f"Starting parallel analysis phase with {len(pending_analyzers)} analyzers...")
 
@@ -353,9 +368,11 @@ class Orchestrator:
         # Tracks plugin_ids that are done
         completed_plugins = set()
 
-        # NOTE: shutdown uses cancel_futures so a Ctrl-C (or an exception in
-        # the scheduler loop) does not block on queued-but-unstarted work.
-        # Subprocesses already running are bounded by the per-tool timeout.
+        dependency_deadlock = False
+
+        # Queued work is cancelled on interruption. Waiting for in-flight
+        # workers establishes a boundary: none can mutate results or write
+        # artifacts after execute() unwinds. External tools remain time-bounded.
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="Worker")
         try:
             # Keep looping as long as there is work to do or threads currently running
@@ -403,6 +420,7 @@ class Orchestrator:
                 # If nothing is running, and there are still pending plugins, it means a
                 # dependency is missing (e.g., waiting on a plugin_id that doesn't exist)
                 if not running_futures and pending_analyzers:
+                    dependency_deadlock = True
                     stuck = [a.plugin_id for a in pending_analyzers]
                     logger.error(f"Deadlock detected! Unmet dependencies for: {stuck}")
                     for analyzer in pending_analyzers:
@@ -429,8 +447,22 @@ class Orchestrator:
                         try:
                             # Calling .result() raises any exceptions that happened inside the thread
                             future.result()
-                            logger.info(f"Completed: {analyzer.name}")
-                            self.target_file.set_plugin_status(analyzer.plugin_id, "completed", duration_ms=duration_ms)
+                            summary = self.target_file.results.get("result_summary", {}).get(analyzer.plugin_id, {})
+                            summary_status = summary.get("status") if isinstance(summary, dict) else None
+                            if summary_status in {"failed", "timeout", "unavailable"}:
+                                reason = summary.get("reason") or summary.get("details") or summary_status
+                                logger.info(f"Finished with status {summary_status}: {analyzer.name}")
+                                self.target_file.set_plugin_status(
+                                    analyzer.plugin_id,
+                                    summary_status,
+                                    error=str(reason),
+                                    duration_ms=duration_ms,
+                                )
+                            else:
+                                logger.info(f"Completed: {analyzer.name}")
+                                self.target_file.set_plugin_status(
+                                    analyzer.plugin_id, "completed", duration_ms=duration_ms
+                                )
                         except ToolTimeout as e:
                             logger.warning(f"Analyzer '{analyzer.name}' timed out: {e}")
                             self.target_file.set_plugin_status(
@@ -452,11 +484,16 @@ class Orchestrator:
                         # Downstream plugins will run, gracefully realize data is missing, and exit.
                         completed_plugins.add(analyzer.plugin_id)
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
         logger.info("Analysis phase complete. Starting reporting phase...")
 
-        self.target_file.results["metadata"]["analyzed_by"] = sorted(completed_plugins)
+        plugin_statuses = self.target_file.results.get("metadata", {}).get("plugins", {})
+        self.target_file.results["metadata"]["analyzed_by"] = sorted(
+            plugin_id
+            for plugin_id in completed_plugins
+            if plugin_statuses.get(plugin_id, {}).get("status") == "completed"
+        )
 
         # Close out the run metadata.
         run_metadata = self.target_file.results["metadata"]["run"]
@@ -464,6 +501,7 @@ class Orchestrator:
         run_metadata["duration_ms"] = round((time.time() - run_started_at) * 1000, 1)
 
         # 2. Generate Reports
+        reporter_failed = False
         for reporter in self.reporters:
             rep_config = self.reporter_config.get("reporters", {}).get(reporter.reporter_id, {})
 
@@ -476,5 +514,11 @@ class Orchestrator:
             try:
                 reporter.generate(self.target_file, self.run_dir, rep_config, self.timestamp)
             except Exception as e:
+                reporter_failed = True
                 logger.exception(f"Error occurred while generating report with {reporter.name}: {e}")
         logger.info("Report generation completed.")
+
+        analysis_failed = any(
+            entry.get("status") in {"failed", "timeout", "unavailable"} for entry in plugin_statuses.values()
+        )
+        return not (analysis_failed or dependency_deadlock or reporter_failed)

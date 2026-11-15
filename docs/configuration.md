@@ -41,6 +41,11 @@ sane defaults.
 | `fetch_relations_behaviour` (VT) | `false` | Fetch contacted IPs/domains, dropped files, etc. |
 | `rate_limit_sleep` (VT) | `20` | Sleep between relation requests (never before the first). |
 
+MalwareBazaar uses a retrying HTTP session for 429/5xx responses and honors
+`Retry-After`. VirusTotal uses the official `vt-py` client, without an added
+statcheck retry session. Both providers use lock-protected disk caches;
+updates prune expired entries and retain at most 1024 entries per provider.
+
 ### IOC extractor (`iocextractor`)
 
 | Key | Default | Description |
@@ -67,7 +72,8 @@ sane defaults.
 
 | Key | Default | Description |
 |---|---|---|
-| `max_file_bytes` | 2 GiB | Input size guard. |
+| `max_file_bytes` | 2 GiB | Input size guard, enforced centrally before analyzers read the file. |
+| `max_tool_output_mb` | 512 | Max captured bytes for each external tool's stdout and stderr. Excess output is discarded and the analyzer is marked unavailable. |
 | `max_resource_bytes` | 100 MiB | Max size of a single extracted artifact. |
 | `max_total_extracted_bytes` | 1 GiB | Total extraction budget per run. |
 | `max_raw_json_mb` | 512 | Max size of a plugin raw JSON file (oversized payloads are replaced by a truncation stub). |

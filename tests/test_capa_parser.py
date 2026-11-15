@@ -19,6 +19,14 @@ VALID_PAYLOAD = {
                         {"type": "location"},
                         {
                             "success": True,
+                            "node": {"type": "feature", "feature": {"type": "string", "string": "zebra"}},
+                            "children": [],
+                        },
+                    ],
+                    [
+                        {"type": "location"},
+                        {
+                            "success": True,
                             "node": {"type": "feature", "feature": {"type": "api", "api": "CreateFileW"}},
                             "children": [],
                         },
@@ -48,7 +56,7 @@ def test_parse_valid_payload():
     rule = summary["rule-001"]
     assert rule["name"] == "create file"
     assert rule["rule_attack"] == ["T1105 - command-and-control"]
-    assert "api: CreateFileW" in rule["matched_features"]
+    assert rule["matched_features"] == ["api: CreateFileW", "string: zebra"]
     assert "string: x" not in rule["matched_features"]
 
 

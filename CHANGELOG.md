@@ -22,7 +22,9 @@ semantic versioning.
   before every relation request.
 - Config fallback namespace mismatch (`tools` vs `plugins`).
 - CWD-dependent default paths (project-root anchored everywhere).
-- Invalid `--report` values silently producing no output (now exit 2).
+- Invalid `--report` values silently producing no output (now exit 2);
+  analyzer `failed`/`timeout`/`unavailable` statuses now produce exit 1 after
+  reporting, and reports are generated even when all analyzers are disabled.
 - IOC extractor mutating `tools_config.json` at runtime (metadata moved to
   the cache dir).
 - Java class files (`CAFEBABE`) being misdetected as fat Mach-O.
@@ -31,9 +33,11 @@ semantic versioning.
 ### Added
 - Per-plugin status metadata (`completed`/`failed`/`timeout`/
   `skipped_disabled`/`skipped_dependency`/`unavailable`) and run metadata.
+  Run directories include a UUID suffix to avoid same-second collisions.
 - `src/core/process.py`: shared `run_tool()` helper - every external tool
-  call now has a timeout.
-- Configurable resource limits (extraction, raw output, string counts).
+  call has a timeout, and timed-out process trees are killed.
+- Configurable resource limits (central input size, captured tool output,
+  extraction, raw output, string counts).
 - Expanded CLI: `--config`, `--reporter-config`, `--output-dir`, `--workers`,
   `--timeout`, `--version`, `--list-plugins`, `--format` defaults to `auto`;
   documented exit codes (0/1/2/130).
@@ -41,9 +45,11 @@ semantic versioning.
 - `RuntimeContext` for analyzers (paths, timeout, limits) without changing
   the `analyze()` signature.
 - Markdown reporter.
-- Deterministic output ordering across runs and `PYTHONHASHSEED` values.
+- Deterministic `result_summary` ordering across `PYTHONHASHSEED` values and
+  thread schedules, excluding run metadata and generated paths.
 - Single-pass Shannon entropy; cached target-file bytes; YARA compile cache.
-- On-disk TI response cache with TTL; shared resilient HTTP session.
+- Lock-protected on-disk TI response caches with TTL pruning and a
+  1024-entry cap per provider; retrying MalwareBazaar HTTP session.
 - Authenticode validity/digest/timestamp info; ELF hardening flags
   (PIE/NX/RELRO/canary); PE section and entry-point anomaly checks.
 - Test suite (140+ tests, no network), ruff/mypy/pytest configuration,

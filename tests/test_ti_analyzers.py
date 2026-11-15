@@ -67,6 +67,11 @@ def _run_mb(monkeypatch, tmp_path, mb_target, responses, config=None):
     return mb_target, session
 
 
+def test_ti_analyzers_are_disabled_by_default():
+    assert MalwareBazaarAnalyzer.enabled_by_default is False
+    assert VirusTotalAnalyzer.enabled_by_default is False
+
+
 def test_mb_empty_data_response_is_guarded(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     """Regression: MB 'ok' with empty data used to raise IndexError."""
     payload = {"query_status": "ok", "data": []}
@@ -99,6 +104,27 @@ def test_mb_valid_exact_match(monkeypatch, tmp_path, mb_target, fake_ti_cache):
     # The API key must be sent as a header but never appear in the result.
     assert session.calls[0]["headers"]["Auth-Key"] == "test-key"
     assert "test-key" not in json.dumps(target.results["result_summary"])
+
+
+def test_mb_nullable_exact_match_fields(monkeypatch, tmp_path, mb_target, fake_ti_cache):
+    payload = {
+        "query_status": "ok",
+        "data": [{"signature": "Stealer", "tags": None, "vendor_intel": None}],
+    }
+    target, _ = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)])
+    exact_match = target.results["result_summary"]["malwarebazaar"]["exact_match"]
+    assert exact_match["signature"] == "Stealer"
+    assert exact_match["tags"] == []
+    assert exact_match["vendor_intel_summary"] == []
+
+
+@pytest.mark.parametrize("malformed_item", [None, "not-an-object", 42, []])
+def test_mb_malformed_first_data_item_is_reported(monkeypatch, tmp_path, mb_target, fake_ti_cache, malformed_item):
+    payload = {"query_status": "ok", "data": [malformed_item]}
+    target, _ = _run_mb(monkeypatch, tmp_path, mb_target, [FakeResponse(200, payload)])
+    summary = target.results["result_summary"]["malwarebazaar"]
+    assert summary["exact_match"] == "Malformed response from MalwareBazaar."
+    assert "raw_output_path" in summary
 
 
 def test_mb_hash_not_found(monkeypatch, tmp_path, mb_target, fake_ti_cache):
@@ -135,11 +161,14 @@ def test_mb_base_url_is_configurable(monkeypatch, tmp_path, mb_target, fake_ti_c
     assert session.calls[0]["url"] == "http://127.0.0.1:1/api/"
 
 
-def test_mb_missing_api_key_publishes_nothing(monkeypatch, tmp_path, mb_target):
+def test_mb_missing_api_key_publishes_unavailable(monkeypatch, tmp_path, mb_target):
     monkeypatch.delenv("MB_API_KEY", raising=False)
     analyzer = MalwareBazaarAnalyzer()
     analyzer.analyze(mb_target, tool_path="", plugin_config={}, run_dir=str(tmp_path / "run"))
-    assert "malwarebazaar" not in mb_target.results["result_summary"]
+    summary = mb_target.results["result_summary"]["malwarebazaar"]
+    assert summary["status"] == "unavailable"
+    assert "MB_API_KEY" in summary["reason"]
+    assert set(summary) == {"status", "reason"}
 
 
 # ---------------------------------------------------------------- VirusTotal
@@ -273,7 +302,7 @@ def test_vt_fuzzy_query_is_passed_as_param(monkeypatch, tmp_path, vt_target):
     assert "?" not in search_calls[0]["path"]
 
 
-def test_vt_missing_api_key_publishes_nothing(monkeypatch, tmp_path, vt_target):
+def test_vt_missing_api_key_publishes_unavailable(monkeypatch, tmp_path, vt_target):
     monkeypatch.delenv("VT_API_KEY", raising=False)
     monkeypatch.setattr(
         "src.analyzers.vtcheck_analyzer.vt",
@@ -281,7 +310,10 @@ def test_vt_missing_api_key_publishes_nothing(monkeypatch, tmp_path, vt_target):
     )
     analyzer = VirusTotalAnalyzer()
     analyzer.analyze(vt_target, tool_path="", plugin_config={}, run_dir=str(tmp_path / "run"))
-    assert "vtlookup" not in vt_target.results["result_summary"]
+    summary = vt_target.results["result_summary"]["vtlookup"]
+    assert summary["status"] == "unavailable"
+    assert "VT_API_KEY" in summary["reason"]
+    assert set(summary) == {"status", "reason"}
 
 
 def test_vt_exact_match_is_cached_on_disk(monkeypatch, tmp_path, vt_target):

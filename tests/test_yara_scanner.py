@@ -128,3 +128,37 @@ def test_max_matches_cap_is_enforced(analyzer, tmp_path):
     results, run_dir = _run(analyzer, target, rules_dir, tmp_path, config={"max_matches": 2})
     summary = results["result_summary"]["yara_scanner"]
     assert summary["match_count"] == 2
+
+
+def test_ignored_tags_are_filtered_before_stable_max_matches_cap(analyzer, tmp_path):
+    rules_dir = tmp_path / "filtered_rules"
+    rules_dir.mkdir()
+    for name, tag in (("a_ignored", "info"), ("b_ignored", "benign"), ("c_relevant", ""), ("d_relevant", "")):
+        declaration = f"rule {name} : {tag}" if tag else f"rule {name}"
+        (rules_dir / f"{name}.yar").write_text(
+            f'{declaration} {{ strings: $m = "statcheck-test-marker" condition: $m }}'
+        )
+
+    target = _target(tmp_path)
+    results, run_dir = _run(analyzer, target, rules_dir, tmp_path, config={"max_matches": 2})
+
+    summary = results["result_summary"]["yara_scanner"]
+    assert summary["match_count"] == 2
+    assert [match["rule"] for match in summary["matched_rules"]] == ["c_relevant", "d_relevant"]
+    raw = json.loads((run_dir / summary["raw_output_path"]).read_text())
+    assert [match["rule"] for match in raw["yara_matches"]] == ["c_relevant", "d_relevant"]
+
+
+def test_yara_timeout_publishes_timeout_status(analyzer, rules_dir, tmp_path, monkeypatch):
+    class TimeoutRules:
+        def match(self, *args, **kwargs):
+            raise ysa.yara.TimeoutError("scan timed out")
+
+    monkeypatch.setattr(ysa, "_compile_rules", lambda *args: (TimeoutRules(), False))
+    target = _target(tmp_path)
+
+    results, _ = _run(analyzer, target, rules_dir, tmp_path, config={"timeout": 3})
+
+    summary = results["result_summary"]["yara_scanner"]
+    assert summary["status"] == "timeout"
+    assert "3s" in summary["reason"]

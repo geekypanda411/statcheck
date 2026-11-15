@@ -99,6 +99,28 @@ def test_success_path_publishes_strings_and_raw(monkeypatch, analyzer, harness):
     assert published == {"CreateFileW", "http://evil.example"}
 
 
+def test_string_cap_selects_sorted_strings(monkeypatch, analyzer, harness):
+    payload = {
+        "meta": {},
+        "layout": {
+            "strings": [{"string": "z-last", "tags": []}, {"string": "a-first", "tags": []}],
+            "children": [{"strings": [{"string": "m-middle", "tags": []}, {"string": "b-second", "tags": []}]}],
+        },
+    }
+    _patch_subprocess(monkeypatch, json.dumps(payload))
+    original_get_limit = analyzer.get_limit
+    monkeypatch.setattr(
+        analyzer,
+        "get_limit",
+        lambda key, default=None: 2 if key == "max_strings" else original_get_limit(key, default),
+    )
+
+    results = harness.run(analyzer)
+
+    strings = results["internal_context"]["quantumstrand"]["ioc_extractor_input"]
+    assert [item["string"] for item in strings] == ["a-first", "b-second"]
+
+
 def test_invalid_json_output_is_handled(monkeypatch, analyzer, harness):
     _patch_subprocess(monkeypatch, "not json at all")
 

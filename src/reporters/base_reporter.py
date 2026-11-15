@@ -23,6 +23,6 @@ class BaseReporter(ABC):
         pass
 
     @abstractmethod
-    def generate(self, target_file: TargetFile, output_dir: str, reporter_config: dict, timestamp: int):
+    def generate(self, target_file: TargetFile, output_dir: str, reporter_config: dict, timestamp: int | str):
         # Actual report writer
         pass

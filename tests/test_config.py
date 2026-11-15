@@ -69,6 +69,10 @@ def test_validate_tool_config_rejects_wrong_types():
         validate_tool_config({"plugins": {"capa": {"timeout": "never"}}})
     with pytest.raises(ConfigError):
         validate_tool_config({"bin_path": 123})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"plugins": {"capa": {"timeout": float("inf")}}})
+    with pytest.raises(ConfigError):
+        validate_tool_config({"limits": {"max_file_bytes": float("nan")}})
 
 
 def test_validate_tool_config_warns_on_unknown_keys():

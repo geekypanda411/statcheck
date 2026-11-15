@@ -12,8 +12,6 @@ requires-python = ">=3.11"
 dependencies = [
     "lief>=1.0.0",
     "pefile>=2024.8.26",
-    "ppdeep>=20260221",
-    "py-tlsh>=5.0.0",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
     "vt-py>=0.20.0",
@@ -21,6 +19,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hashes = [
+    "ppdeep>=20260221",
+    "py-tlsh>=5.0.0",
+]
 # Optional hash wheels that sometimes fail to build on constrained CI
 # runners are NOT in `dev` so the default gate stays installable.
 dev = [

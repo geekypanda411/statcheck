@@ -44,7 +44,11 @@ Statuses: `completed`, `failed`, `timeout`, `skipped_disabled`,
 truncated traceback for `failed`.
 
 A report therefore distinguishes "no findings" (plugin completed, empty
-summary) from "crashed" / "disabled" / "tool missing" / "timed out".
+summary) from "crashed" / "disabled" / "tool missing" / "timed out". Reports
+are generated even when every analyzer is disabled or dependency-pruned.
+After reporting, the CLI exits 1 if any analyzer is `failed`, `timeout`, or
+`unavailable`, or if the scheduler detects a dependency deadlock. Intentional
+disabled/dependency-pruning skips alone do not cause that failure.
 
 ## `result_summary`
 
@@ -59,7 +63,7 @@ One section per plugin that published results. Common patterns:
 ## Run directory layout
 
 ```
-reports/<sanitized-name>_<unix-ts>/
+reports/<sanitized-name>_<unix-ts>_<uuid>/
     <name>_statcheck_summary_<ts>.json    JSON report (schema 1.0)
     <name>_statcheck_summary_<ts>.md      Markdown report (if enabled)
     fileinfo/ ... raw artifacts per plugin
@@ -67,8 +71,11 @@ reports/<sanitized-name>_<unix-ts>/
     resource_overlay/extracted_resources/...
 ```
 
+The UUID suffix makes run IDs unique even for runs started in the same second.
+
 ## Determinism guarantees
 
-Given the same input file and config, two runs produce byte-identical
-`result_summary` sections (after excluding timestamps/run paths), regardless
-of `PYTHONHASHSEED` or thread scheduling.
+Given the same input file, config, and analyzer/tool results, two runs produce
+byte-identical `result_summary` sections regardless of `PYTHONHASHSEED` or
+thread scheduling, excluding paths embedded in those sections. Run metadata
+and generated paths are outside the determinism guarantee.

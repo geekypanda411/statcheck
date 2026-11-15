@@ -8,6 +8,8 @@ possible. No network, no writes outside ``tmp_path``.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -16,16 +18,16 @@ from src.analyzers.resource_overlay_analyzer import ResourceOverlayAnalyzer
 from src.core.target_file import TargetFile
 
 
-def _res_entry(type_id, id_, lang_id, offset, data):
+def _res_entry(type_id, id_, lang_id, offset, data, type_name=None, id_name=None):
     """Build a pefile-shaped resource tree node."""
     return SimpleNamespace(
         struct=SimpleNamespace(Id=type_id),
-        name=None,
+        name=type_name,
         directory=SimpleNamespace(
             entries=[
                 SimpleNamespace(
                     struct=SimpleNamespace(Id=id_),
-                    name=None,
+                    name=id_name,
                     directory=SimpleNamespace(
                         entries=[
                             SimpleNamespace(
@@ -141,7 +143,47 @@ def test_resource_filenames_unique_across_languages(analyzer, tmp_path, monkeypa
 
 def test_resource_filename_format(analyzer):
     name = analyzer._resource_filename("RT_RCDATA", "weird/name!", 1033)
-    assert name == "rsrc_RT_RCDATA_weird_name__1033.bin"
+    assert re.fullmatch(r"rsrc_RT_RCDATA_weird_name__1033_[0-9a-f]{12}\.bin", name)
+    assert name == analyzer._resource_filename("RT_RCDATA", "weird/name!", 1033)
+    assert name != analyzer._resource_filename("RT_RCDATA", "weird?name!", 1033)
+
+
+def test_named_resources_cannot_traverse_or_collide_after_sanitizing(analyzer, tmp_path, monkeypatch):
+    image = bytes(range(256)) * 32
+    entries = [
+        _res_entry(
+            None,
+            None,
+            "../1033",
+            16,
+            image[16:2064],
+            type_name="safe/../../../escape",
+            id_name="a/b",
+        ),
+        _res_entry(
+            None,
+            None,
+            "../1033",
+            2100,
+            image[2100:2612],
+            type_name="safe?..?..?..?escape",
+            id_name="a?b",
+        ),
+    ]
+
+    target, run_dir = _run_pe(analyzer, tmp_path, monkeypatch, entries, image)
+    summary = target.results["result_summary"]["resource_overlay"]
+    extracted = [entry["extracted_to"] for entry in summary["resources"]]
+    resource_root = (run_dir / "resource_overlay" / "extracted_resources").resolve()
+
+    assert len(extracted) == 2
+    assert len(set(extracted)) == 2, "raw names that sanitize identically must still have unique outputs"
+    for relative_path in extracted:
+        assert relative_path is not None
+        output_path = (run_dir / relative_path).resolve()
+        assert output_path.is_relative_to(resource_root)
+        assert output_path.parent == resource_root
+        assert output_path.is_file()
 
 
 def test_extraction_respects_size_limits(analyzer, tmp_path, monkeypatch):
@@ -198,3 +240,37 @@ def test_overlay_is_carved_and_sorted(analyzer, tmp_path, monkeypatch):
     assert offsets == sorted(offsets), "carved artifacts must be sorted deterministically"
     assert ovl["extracted_to"] and not ovl["extracted_to"].startswith("/")
     assert (run_dir / ovl["extracted_to"]).is_file()
+
+
+def _run_elf_bytes(analyzer, tmp_path, data, name="sample.elf"):
+    sample = tmp_path / name
+    sample.write_bytes(data)
+    target = TargetFile(str(sample), "elf")
+    run_dir = tmp_path / f"{name}-run"
+    run_dir.mkdir()
+    analyzer.analyze(target, tool_path="", plugin_config={}, run_dir=str(run_dir))
+    return target.results["result_summary"]["resource_overlay"]
+
+
+def test_normal_elf_section_header_table_is_not_overlay(analyzer, tmp_path):
+    true_binary = Path("/bin/true")
+    if not true_binary.is_file():
+        pytest.skip("real /bin/true is required for this regression")
+
+    summary = _run_elf_bytes(analyzer, tmp_path, true_binary.read_bytes())
+
+    assert summary.get("status") == "no_resources_or_overlay"
+    assert not summary.get("overlay")
+
+
+def test_bytes_after_all_elf_structures_are_still_an_overlay(analyzer, tmp_path):
+    true_binary = Path("/bin/true")
+    if not true_binary.is_file():
+        pytest.skip("real /bin/true is required for this regression")
+    original = true_binary.read_bytes()
+    trailer = b"STATCHECK-TRAILING-OVERLAY"
+
+    summary = _run_elf_bytes(analyzer, tmp_path, original + trailer, name="appended.elf")
+
+    assert summary["overlay"][0]["absolute_offset"] == len(original)
+    assert summary["overlay"][0]["size"] == len(trailer)

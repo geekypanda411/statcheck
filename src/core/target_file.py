@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 
@@ -8,6 +9,13 @@ class TargetFile:
         self.format = file_format.lower()
         self.results: dict = {"metadata": {}, "result_summary": {}, "internal_context": {}}
         self._data: bytes | None = None
+        self._data_lock = threading.Lock()
+
+    def reset(self) -> None:
+        """Clear all data derived from a previous run of the same target."""
+        with self._data_lock:
+            self._data = None
+            self.results = {"metadata": {}, "result_summary": {}, "internal_context": {}}
 
     def add_result(self, tool_name: str, summary_data=None, internal_context_data=None):
         # use .setdefault() so that if the key gets deleted somehow Python will recreate it on the fly!
@@ -41,9 +49,13 @@ class TargetFile:
         self.results.setdefault("metadata", {}).setdefault("plugins", {})[plugin_id] = entry
 
     def read_bytes(self) -> bytes:
-        """Cached full read of the target file (one read per run)."""
+        """Return the cached target bytes, reading at most once per run."""
         if self._data is None:
-            self._data = self.path.read_bytes()
+            # Independent analyzers call this concurrently. Double-checked
+            # locking prevents duplicate whole-file reads and allocations.
+            with self._data_lock:
+                if self._data is None:
+                    self._data = self.path.read_bytes()
         return self._data
 
     def read_mmap(self):

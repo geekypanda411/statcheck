@@ -106,13 +106,7 @@ class MarkdownReporter(BaseReporter):
                 lines.extend(_render_value(section))
                 lines.append("")
 
-        try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-            logger.info(f"Successfully generated Markdown report at: {output_path}")
-        except PermissionError:
-            logger.error(f"Permission denied: Could not write Markdown report to {output_path}")
-        except Exception as e:
-            logger.exception(
-                f"An unexpected error occurred while generating Markdown report for {target_file.filename} : {e}"
-            )
+        # Propagate failures so the orchestrator can return a failure status.
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        logger.info(f"Successfully generated Markdown report at: {output_path}")

@@ -62,6 +62,9 @@ def app(tmp_path, project_root):
 
 
 def _run(app, analyzers, tmp_path, config=None):
+    # The real CLI validates this before execute(); unit fixtures must provide
+    # it too now that execute enforces max_file_bytes centrally.
+    Path(app.target_file.path).write_bytes(b"test-sample")
     app.analyzers = analyzers
     app.config = {"bin_path": "./bin", "plugins": config or {}}
     run_dir = tmp_path / "reports"
@@ -125,7 +128,7 @@ def test_analyzed_by_is_sorted(app, tmp_path):
     run_dir, app = _run(app, [CrashingAnalyzer(), OkAnalyzer(), DependentAnalyzer()], tmp_path)
     analyzed = app.target_file.results["metadata"]["analyzed_by"]
     assert analyzed == sorted(analyzed)
-    assert set(analyzed) == {"stub_ok", "stub_crash", "stub_dep"}
+    assert set(analyzed) == {"stub_ok", "stub_dep"}
 
 
 def test_runtime_context_reaches_analyzers(app, tmp_path):

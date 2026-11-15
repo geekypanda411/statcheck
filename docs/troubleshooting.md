@@ -4,10 +4,10 @@
 
 | Code | Meaning |
 |---|---|
-| 0 | Success. |
-| 1 | Runtime failure (file not found, analyzer crash). |
+| 0 | Success, including a report with all analyzers disabled/pruned. |
+| 1 | Runtime failure or any analyzer `failed`/`timeout`/`unavailable` status (reports are still attempted). |
 | 2 | Usage/config error (bad `--report` value, invalid config types). |
-| 130 | Interrupted with Ctrl-C. |
+| 130 | Interrupted with Ctrl-C after queued work is cancelled and running analyzers stop/finish. |
 
 ## A plugin shows `status: "unavailable"`
 
@@ -62,12 +62,15 @@ back to a small built-in TLD list.
 
 ## Reports differ between two runs of the same sample
 
-They should not (aside from timestamps and the run directory name). If they
-do, look for a plugin emitting unsorted `set(...)` output or absolute paths,
-and file a bug with both reports attached.
+Whole reports include variable run metadata and generated paths. With the
+same input, config, and analyzer/tool results, `result_summary` should still
+be deterministic after excluding embedded paths. Otherwise, look for a plugin
+emitting unsorted `set(...)` output and file a bug with both reports attached.
 
 ## I installed the package and defaults point into site-packages
 
-Default paths are anchored to the project layout; for a *non-editable*
-install pass `--config` / `--output-dir` explicitly, or use an editable
-install (`pip install -e .`).
+For a *non-editable* install, pass `--config`, `--reporter-config`, and
+`--output-dir` explicitly. The tool config's `bin_path` is resolved relative
+to that config; use absolute values for YARA `rule_path` and other resources
+kept in the source tree. Alternatively, use an editable install
+(`pip install -e .`), which keeps defaults anchored to the checkout.

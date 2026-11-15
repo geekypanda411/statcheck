@@ -36,9 +36,9 @@ make typecheck    # mypy (pragmatic config; tighten module by module)
 
 ## Never commit
 
-`.venv/`, `bin/*` binaries, `yara_rules/*.yar`, `reports/*`,
-`test_binaries/*`, `tools_config.json`, `.env`, API keys, generated
-artifacts.
+`.venv/`, `bin/*` binaries (except `bin/README.md` and `.gitkeep`),
+`yara_rules/*.yar`, `reports/*`, `test_binaries/*`, `tools_config.json`,
+`.env`, API keys, `build/`, `*.egg-info/`, and other generated artifacts.
 
 ## Conventional commits
 

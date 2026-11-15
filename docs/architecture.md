@@ -44,12 +44,16 @@ docs/                       Documentation
    `skipped_dependency`.
 5. **DAG scheduling**: a thread pool (default 10 workers) runs analyzers as
    soon as their dependencies complete. Deadlocks (unsatisfiable
-   dependencies) are detected and reported.
+   dependencies) are detected and reported. The central `max_file_bytes`
+   guard rejects oversized inputs before analyzer execution.
 6. **Status recording**: each plugin gets `completed` / `failed` /
-   `timeout` plus duration in `metadata.plugins`. Failures store the repr and
-   a truncated traceback.
+   `timeout` / `unavailable` / `skipped_disabled` / `skipped_dependency` plus
+   duration in `metadata.plugins`. Failures store the repr and a truncated
+   traceback.
 7. **Reporting**: each enabled reporter renders `metadata` +
-   `result_summary` into the run directory.
+   `result_summary` into the run directory, even when every analyzer is
+   disabled or dependency-pruned. Any `failed`, `timeout`, or `unavailable`
+   analyzer makes the CLI return exit code 1 after reporting.
 
 ## DAG semantics
 
@@ -82,8 +86,11 @@ public `analyze()` signature. Third-party plugins keep working.
 ## Reliability
 
 - Every external tool call goes through `run_tool()` with a mandatory
-  timeout; `ToolTimeout` propagates to the orchestrator (status `timeout`),
-  `ToolError` degrades to a `status: unavailable` summary.
-- Extraction/output sizes are capped through the `limits` config.
-- Ctrl-C cancels queued work (`shutdown(cancel_futures=True)`) and exits
-  with code 130; running subprocesses are bounded by their timeout.
+  timeout. On timeout the whole tool process tree is terminated, and
+  `ToolTimeout` propagates to the orchestrator (status `timeout`). `ToolError`
+  degrades to a `status: unavailable` summary.
+- `max_file_bytes` is enforced centrally. `max_tool_output_mb` (512 MiB by
+  default) caps captured external-tool output; extraction and other output
+  sizes are also capped through the `limits` config.
+- Ctrl-C cancels queued work, waits for running analyzers to stop/finish, and
+  exits with code 130.

@@ -15,6 +15,7 @@ DEFAULT_LIMITS = {
     "max_resource_bytes": 100 * 1024**2,  # 100 MiB per extracted artifact
     "max_total_extracted_bytes": 1024**3,  # 1 GiB per run
     "max_raw_json_mb": 512,  # raw JSON files per plugin
+    "max_tool_output_mb": 512,  # captured stdout/stderr per external tool
     "max_summary_items": 10000,  # per summary category
     "max_strings": 1_000_000,  # strings fed to IOC extraction
     "max_ioc_text_mb": 64,  # text block fed to IOC regexes
@@ -68,6 +69,10 @@ class BaseAnalyzer(ABC):
     def plugin_id(self) -> str | None:
         # Optional: to look up tool path and plugin config in tools_config.json
         return None
+
+    # Most analyzers are local and opt-out. Network-facing plugins override
+    # this so a missing config can never silently enable third-party lookups.
+    enabled_by_default = True
 
     @property
     def depends(self) -> dict:

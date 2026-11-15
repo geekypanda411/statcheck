@@ -4,7 +4,7 @@ from functools import reduce
 from pathlib import Path
 
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
-from src.core.process import ToolError, run_tool
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +93,22 @@ class DIEAnalyzer(BaseAnalyzer):
         logger.debug(f"Using diec executable at: {executable}")
 
         timeout = self.resolve_timeout(plugin_config)
+        max_output_bytes = int(self.get_limit("max_tool_output_mb")) * 1024 * 1024
         diec_tasks = {"diec-info": "-ji", "diec-entropy": "-je", "diec-packer": "-ja", "diec-hash": "-jS"}
 
         raw_results = {}
+        errors = []
 
         for task_name, flag in diec_tasks.items():
             logger.debug(f"Running diec with flag: {flag}")
 
             try:
                 # -j tells diec to output in pure JSON
+                command = [executable, flag]
                 if task_name == "diec-hash":
-                    result = run_tool([executable, flag, "Hash", str(target_file.path)], timeout=timeout)
-                else:
-                    result = run_tool([executable, flag, str(target_file.path)], timeout=timeout)
+                    command.append("Hash")
+                command.append(str(target_file.path))
+                result = run_tool(command, timeout=timeout, max_output_bytes=max_output_bytes)
 
                 if not result.stdout.strip():
                     logger.debug(f"DiE flag {flag} returned empty output, skipping.")
@@ -114,20 +117,28 @@ class DIEAnalyzer(BaseAnalyzer):
                     raw_results[task_name] = diec_data
                     logger.debug(f"DiE analysis for flag {flag} complete.")
 
+            except ToolTimeout:
+                # Stop immediately so no later DiE commands run after a timeout.
+                raise
             except ToolError as e:
-                # Use warning instead of error so that if one check fails the rest are still executed
+                # Preserve successful subcommand output, but mark the overall
+                # analysis unavailable because it is incomplete.
                 logger.warning(f"DiE ({flag}) failed to execute: {e}")
-            except json.JSONDecodeError:
+                errors.append(f"{task_name}: {e}")
+            except json.JSONDecodeError as e:
                 logger.warning(f"DiE ({flag}) output could not be parsed as JSON.")
-            except Exception:
-                logger.exception(f"Unexpected error in DiE task '{task_name}'")
+                errors.append(f"{task_name}: invalid JSON output: {e}")
 
         # Always write the raw output, even when empty/failed.
         logger.debug("Parsing diec output")
         parsed_results = self.parse_analyzer_output(raw_results)
         parsed_results["raw_output_path"] = self.save_raw(run_dir, "diec_raw_output.json", raw_results)
-        parsed_results["status"] = "ok" if raw_results else "no_output"
-        if parsed_results["status"] != "ok":
-            parsed_results["reason"] = "diec produced no parseable output for this sample."
+        if errors:
+            parsed_results["status"] = "unavailable"
+            parsed_results["reason"] = "; ".join(errors)
+        else:
+            parsed_results["status"] = "ok" if raw_results else "no_output"
+            if parsed_results["status"] != "ok":
+                parsed_results["reason"] = "diec produced no parseable output for this sample."
 
         target_file.add_result(self.plugin_id, summary_data=parsed_results)

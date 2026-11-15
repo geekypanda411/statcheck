@@ -37,12 +37,13 @@ file-processing pipeline.
 - **Observability:** every run records per-plugin status
   (`completed`/`failed`/`timeout`/`skipped_disabled`/`skipped_dependency`/
   `unavailable`), durations, and run metadata.
-- **Bounded execution:** every external tool call has a timeout; extraction
-  and output sizes are capped through configurable limits.
-- **Deterministic output:** identical inputs produce byte-identical reports
-  (sorted collections everywhere, stable section ordering).
-- **Resilient threat intelligence:** VirusTotal and MalwareBazaar integrations
-  with retries, `Retry-After` handling, and an on-disk response cache.
+- **Bounded execution:** central input-size checks, capped tool output and
+  extraction sizes, and timeouts that terminate the full tool process tree.
+- **Deterministic summaries:** identical inputs and tool results produce
+  byte-identical `result_summary` sections, excluding run metadata and paths.
+- **Threat-intelligence caching:** VirusTotal uses its official client;
+  MalwareBazaar adds retries and `Retry-After` handling. Both have pruned,
+  size-capped on-disk response caches.
 - **Decoupled reporting:** JSON and Markdown reporters, configurable through
   `reporter_config.json`.
 
@@ -54,8 +55,15 @@ Requires Python 3.11+.
 git clone https://github.com/geekypanda411/statcheck.git
 cd statcheck
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"        # or: pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
+
+`ppdeep` (SSDeep) and `py-tlsh` (TLSH) are optional; install them with
+`pip install -e ".[dev,hashes]"`. Without them, only those hashes are skipped.
+For the pinned reference environment, `pip install -r requirements.txt` is an
+alternative. That requirements-only install does not create the console
+script: use `python main.py` instead of `statcheck`, or run
+`pip install --no-deps -e .` to install the project without changing the pins.
 
 External tool binaries live in `bin/` (gitignored) and YARA rules in
 `yara_rules/` (also gitignored). Provision them manually or with
@@ -67,6 +75,39 @@ Copy the example config and add API keys via `.env` (never commit them):
 cp tools_config.json.example tools_config.json
 printf 'MB_API_KEY=...\nVT_API_KEY=...\n' > .env
 ```
+
+For a non-editable `pip install .`, always pass explicit paths to source-tree
+configuration and a writable report directory:
+
+```bash
+statcheck sample.exe \
+  --config /path/to/statcheck/tools_config.json \
+  --reporter-config /path/to/statcheck/reporter_config.json \
+  --output-dir /path/to/reports
+```
+
+`bin_path` is resolved relative to the selected tool config. Use absolute
+YARA `rule_path` and other project-resource paths in that config when the
+package is installed non-editably. Editable installs are recommended for use
+directly from a source checkout.
+
+### Docker
+
+The image uses an editable install rooted at `/opt/statcheck` and creates its
+default `tools_config.json` from the example, so its default tool/config/rule
+paths work with this invocation:
+
+```bash
+docker build -t statcheck .
+docker run --rm \
+  -v "/path/to/samples:/work" \
+  -v "$PWD/bin:/opt/statcheck/bin:ro" \
+  -v "$PWD/yara_rules:/opt/statcheck/yara_rules:ro" \
+  statcheck /work/sample.exe --report json --output-dir /work/reports
+```
+
+Run these commands from the source checkout after provisioning `bin/` and
+`yara_rules/`; the Dockerfile comments show the same mount layout.
 
 ## Usage
 
@@ -81,10 +122,13 @@ statcheck sample.exe --workers 4 --timeout 120
 
 Useful flags: `--config`, `--reporter-config`, `--output-dir`, `--workers`,
 `--timeout`, `--debug`, `--log-file`, `--version`. Exit codes: `0` success,
-`1` runtime/analysis failure, `2` usage/config error, `130` interrupted.
+`1` runtime failure or any `failed`/`timeout`/`unavailable` analyzer, `2`
+usage/config error, `130` interrupted. Reports are still attempted after
+analyzer failures and are generated when all analyzers are disabled/pruned.
 
-Reports are written to `<output-dir>/<name>_<timestamp>/` and contain the
-summary report(s) plus one sub-directory of raw artifacts per plugin.
+Reports are written to `<output-dir>/<name>_<timestamp>_<uuid>/` and contain
+the summary report(s) plus one sub-directory of raw artifacts per plugin. The
+UUID suffix prevents same-second run-directory collisions.
 
 ## Writing a plugin (analyzer)
 
@@ -95,7 +139,7 @@ Create a Python file in `src/analyzers/` (or `src/analyzers/pe/` /
 ```python
 import json
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
-from src.core.process import ToolError, run_tool
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 
 class CustomAnalyzer(BaseAnalyzer):
@@ -116,6 +160,8 @@ class CustomAnalyzer(BaseAnalyzer):
             return
         try:
             result = run_tool([executable, str(target_file.path)], timeout=self.resolve_timeout(plugin_config))
+        except ToolTimeout:
+            raise  # Preserve the distinct orchestrator timeout status.
         except ToolError as e:
             target_file.add_result(self.plugin_id, summary_data={"status": "unavailable", "reason": str(e)})
             return
@@ -146,6 +192,7 @@ More details: [docs/plugin-api.md](docs/plugin-api.md),
 - [Troubleshooting](docs/troubleshooting.md)
 - [Security](docs/security.md)
 - [External tools](bin/README.md)
+- [Testdev review remediation checklist](docs/review-findings.md)
 
 ## Roadmap
 

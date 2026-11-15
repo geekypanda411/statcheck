@@ -39,13 +39,62 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
 
     @staticmethod
     def _resource_filename(res_type_str: str, res_id_name: str, lang_id) -> str:
-        """Deterministic, collision-free name for an extracted resource.
+        """Return a readable, deterministic basename for a raw resource tuple.
 
-        Includes the language ID so the same type/id in different languages
-        cannot overwrite each other: ``rsrc_{type}_{id}_{lang}.bin``.
+        Sanitizing each component separately prevents path traversal, while the
+        digest distinguishes raw names that normalize to the same readable text
+        (for example, ``a/b`` and ``a?b``).
         """
-        safe_id = "".join([c if c.isalnum() else "_" for c in str(res_id_name)])
-        return f"rsrc_{res_type_str}_{safe_id}_{lang_id}.bin"
+
+        def safe_component(value) -> str:
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(value)).strip(".")
+            safe = safe[:48].strip(".")
+            return safe or "unnamed"
+
+        raw_parts = (str(res_type_str), str(res_id_name), str(lang_id))
+        digest = hashlib.sha256(repr(raw_parts).encode("utf-8")).hexdigest()[:12]
+        safe_type, safe_id, safe_lang = (safe_component(part) for part in raw_parts)
+        return f"rsrc_{safe_type}_{safe_id}_{safe_lang}_{digest}.bin"
+
+    @staticmethod
+    def _elf_overlay_offset(elf, file_size: int) -> int | None:
+        """Locate trailing bytes after all file-backed ELF structures.
+
+        In particular, section contents usually end before the section-header
+        table. Treating that table (or the program-header table) as an overlay
+        makes ordinary, unmodified ELF files look anomalous.
+        """
+        structured_end = 0
+
+        def include_range(offset, size) -> None:
+            nonlocal structured_end
+            offset, size = int(offset), int(size)
+            if offset < 0 or size < 0 or offset > file_size or size > file_size - offset:
+                raise ValueError(f"ELF structure range ({offset}, {size}) exceeds the file size ({file_size})")
+            structured_end = max(structured_end, offset + size)
+
+        header = elf.header
+        include_range(0, getattr(header, "header_size", 0))
+        include_range(
+            getattr(header, "program_header_offset", 0),
+            getattr(header, "program_header_size", 0) * getattr(header, "numberof_segments", 0),
+        )
+        include_range(
+            getattr(header, "section_header_offset", 0),
+            getattr(header, "section_header_size", 0) * getattr(header, "numberof_sections", 0),
+        )
+
+        for section in elf.sections:
+            # NOBITS sections, such as .bss, occupy memory but no file bytes.
+            if str(section.type).rsplit(".", 1)[-1] != "NOBITS":
+                include_range(section.file_offset, section.size)
+
+        for segment in elf.segments:
+            include_range(segment.file_offset, segment.physical_size)
+
+        if not structured_end or structured_end >= file_size:
+            return None
+        return structured_end
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
         logger.debug(f"Starting Resource & Overlay analysis on {target_file.filename}")
@@ -159,12 +208,22 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
                                 if may_extract and budget_extract(size, label):
                                     os.makedirs(rsrc_out_dir, exist_ok=True)
                                     file_name = self._resource_filename(res_type_str, str(res_id), lang_id)
-                                    extracted_path = os.path.join(rsrc_out_dir, file_name)
-                                    with open(extracted_path, "wb") as out_f:
-                                        out_f.write(res_data)
-                                    total_extracted_bytes += size
-                                    # Reports carry run-dir-relative paths only.
-                                    extracted_path = os.path.relpath(extracted_path, start=run_dir)
+                                    rsrc_root = os.path.realpath(rsrc_out_dir)
+                                    candidate_path = os.path.realpath(os.path.join(rsrc_root, file_name))
+                                    try:
+                                        contained = os.path.commonpath((rsrc_root, candidate_path)) == rsrc_root
+                                    except ValueError:
+                                        contained = False
+                                    if not contained:
+                                        logger.warning(
+                                            f"Refusing to extract {label}: output path escapes resource directory."
+                                        )
+                                    else:
+                                        with open(candidate_path, "wb") as out_f:
+                                            out_f.write(res_data)
+                                        total_extracted_bytes += size
+                                        # Reports carry run-dir-relative paths only.
+                                        extracted_path = os.path.relpath(candidate_path, start=run_dir)
 
                                 summary["resources"].append(
                                     {
@@ -211,18 +270,13 @@ class ResourceOverlayAnalyzer(BaseAnalyzer):
                 if elf is None:
                     logger.error("LIEF failed to parse the ELF file.")
                 else:
-                    # Find the end of the last section to locate the overlay
-                    max_offset = 0
-                    for section in elf.sections:
-                        if section.file_offset + section.size > max_offset:
-                            max_offset = section.file_offset + section.size
-
-                    # If the file is larger than the defined sections, we have an overlay
-                    if len(file_bytes) > max_offset:
-                        overlay_data = file_bytes[max_offset:]
-                        overlay_offset = max_offset
-                    else:
-                        overlay_data = None
+                    try:
+                        overlay_offset = self._elf_overlay_offset(elf, len(file_bytes))
+                    except (TypeError, ValueError) as e:
+                        # Malformed structural ranges are not evidence of an overlay.
+                        logger.warning(f"Skipping ELF overlay detection because its structures are invalid: {e}")
+                        overlay_offset = None
+                    overlay_data = file_bytes[overlay_offset:] if overlay_offset is not None else None
 
             except Exception as e:
                 logger.error(f"LIEF failed during ELF overlay parsing: {e}")

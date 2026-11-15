@@ -68,10 +68,32 @@ class ELFStructureAnalyzer(BaseAnalyzer):
         has_relro = self._has_relro(elf)
         has_canary = self._has_stack_canary(elf)
 
+        # Imported libraries (defensive: LIEF returns iterators in 1.0).
+        try:
+            libraries = sorted(str(lib) for lib in elf.libraries)
+        except Exception:
+            libraries = []
+
+        has_interpreter = bool(elf.has_interpreter)
+        header = getattr(elf, "header", None)
+        file_type = str(getattr(header, "file_type", "")).split(".")[-1]
+        entrypoint = int(getattr(header, "entrypoint", 0) or 0)
+        # A dependency-free shared object still is not a statically linked
+        # executable. ET_DYN with no entry point represents that common case;
+        # static PIE executables retain a nonzero entry point.
+        is_shared_object = file_type == "DYN" and not has_interpreter and entrypoint == 0
+        is_statically_linked = not has_interpreter and not libraries and not is_shared_object
+        if has_interpreter:
+            interpreter = elf.interpreter
+        elif is_statically_linked:
+            interpreter = "None (Statically Linked)"
+        else:
+            interpreter = "None (No PT_INTERP segment)"
+
         summary = {
             "flags": {
                 "is_stripped": False,
-                "is_statically_linked": not elf.has_interpreter,
+                "is_statically_linked": is_statically_linked,
                 "has_rwx_segments": False,
                 "has_custom_rpath": False,
             },
@@ -81,16 +103,10 @@ class ELFStructureAnalyzer(BaseAnalyzer):
                 "has_relro": has_relro,
                 "has_stack_canary": has_canary,
             },
-            "interpreter": elf.interpreter if elf.has_interpreter else "None (Statically Linked)",
+            "interpreter": interpreter,
             "anomalies": {},
+            "imported_libraries": libraries,
         }
-
-        # Imported libraries (defensive: LIEF returns iterators in 1.0).
-        try:
-            libraries = sorted(str(lib) for lib in elf.libraries)
-        except Exception:
-            libraries = []
-        summary["imported_libraries"] = libraries
 
         complete_raw = {"segments": [], "dynamic_libraries": libraries}
 

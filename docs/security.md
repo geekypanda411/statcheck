@@ -19,7 +19,8 @@ Even so, treat every input as hostile.
   if enabled) are sent to VirusTotal and abuse.ch. Both TI plugins are
   disabled by default.
 - TI responses are cached on disk under `$XDG_CACHE_HOME/statcheck` - wipe
-  the directory if that matters for your environment.
+  the directory if that matters for your environment. Cache updates use file
+  locks, prune expired entries, and retain at most 1024 entries per provider.
 
 ## API keys
 
@@ -30,9 +31,11 @@ Even so, treat every input as hostile.
 
 ## Resource safety
 
-- Every external tool invocation has a timeout (`timeout` config, `--timeout`).
-- Extraction and raw-output sizes are capped via the `limits` config, so
-  crafted samples cannot exhaust disk or produce unbounded reports.
+- Every external tool invocation has a timeout (`timeout` config, `--timeout`)
+  and its process tree is killed on timeout. Captured output is capped by
+  `max_tool_output_mb` (512 MiB by default).
+- `max_file_bytes` is enforced centrally. Extraction and raw-output sizes are
+  capped via the `limits` config to bound disk use and report generation.
 - Run directories contain extracted (potentially malicious) artifacts;
   sanitize before sharing.
 

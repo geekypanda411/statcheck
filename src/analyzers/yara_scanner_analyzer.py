@@ -170,8 +170,10 @@ class YaraAnalyzer(BaseAnalyzer):
             )
             return
 
-        # Enforce max_matches (deterministic: cap after stable ordering).
-        matches = sorted(matches, key=lambda m: (str(m.rule), tuple(m.tags)))
+        # Filter before enforcing max_matches so ignored rules cannot consume
+        # the stable cap and hide relevant matches.
+        matches = [match for match in matches if not any(tag in ignored_tags for tag in match.tags)]
+        matches = sorted(matches, key=lambda m: (str(m.rule), tuple(sorted(str(tag) for tag in m.tags))))
         if len(matches) > max_matches:
             logger.warning(f"yara_scanner: capping matched rules at max_matches ({len(matches)} -> {max_matches}).")
             matches = matches[:max_matches]
@@ -181,15 +183,11 @@ class YaraAnalyzer(BaseAnalyzer):
         raw_matches = []
 
         for match in matches:
-            # 1. Check against the ignored_tags filter
-            if any(tag in ignored_tags for tag in match.tags):
-                continue
-
             rule_name = match.rule
             tags = sorted(match.tags)
             meta = match.meta
 
-            # 2. Extract matched strings with Two-Stage Decoding
+            # 1. Extract matched strings with Two-Stage Decoding
             # YARA strings format: (offset, string_identifier, string_data)
             parsed_strings = []
             for string_match in match.strings:
@@ -227,10 +225,10 @@ class YaraAnalyzer(BaseAnalyzer):
 
             parsed_strings.sort(key=lambda p: (p["offset"], p["identifier"]))
 
-            # 3. Append to Raw (goes to disk)
+            # 2. Append to Raw (goes to disk)
             raw_matches.append({"rule": rule_name, "tags": tags, "meta": meta, "strings": parsed_strings})
 
-            # 4. Append to Summary
+            # 3. Append to Summary
             summary_matches.append(
                 {
                     "rule": rule_name,

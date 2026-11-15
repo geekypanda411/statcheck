@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from src.analyzers.base_analyzer import BaseAnalyzer, resolve_tool_path
-from src.core.process import ToolError, run_tool
+from src.core.process import ToolError, ToolTimeout, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,8 @@ class CapaAnalyzer(BaseAnalyzer):
                     root_node = match[1]
                     extract_successful_features(root_node, matched_features_temp)
 
-            # Convert sets back to lists for JSON serialization
-            clean_matched_features = list(matched_features_temp)
+            # Convert sets to sorted lists for deterministic JSON serialization.
+            clean_matched_features = sorted(matched_features_temp)
 
             output_summary[rule_id] = {
                 "name": meta.get("name", rule_id),
@@ -112,19 +112,25 @@ class CapaAnalyzer(BaseAnalyzer):
         logger.debug(f"Using capa executable at: {executable}")
 
         timeout = self.resolve_timeout(plugin_config)
+        max_output_bytes = int(self.get_limit("max_tool_output_mb")) * 1024 * 1024
         # Tell capa the sample format explicitly; capa rejects formats it does
         # not know, so anything exotic falls back to 'auto'.
         capa_format = target_file.format if target_file.format in ("pe", "elf") else "auto"
         capa_tasks = {"capa-all": ["-jq", "-f", capa_format]}
 
         raw_results = {}
+        errors = []
 
         for task_name, flags in capa_tasks.items():
             logger.debug(f"Running capa with flags: {flags}")
 
             try:
                 # -j tells capa to output in pure JSON
-                result = run_tool([executable, *flags, str(target_file.path)], timeout=timeout)
+                result = run_tool(
+                    [executable, *flags, str(target_file.path)],
+                    timeout=timeout,
+                    max_output_bytes=max_output_bytes,
+                )
 
                 if not result.stdout.strip():
                     logger.debug(f"capa flags {flags} returned empty output, skipping.")
@@ -133,13 +139,17 @@ class CapaAnalyzer(BaseAnalyzer):
                     raw_results[task_name] = capa_data
                     logger.debug(f"capa analysis for flags {flags} complete.")
 
+            except ToolTimeout:
+                # Let the orchestrator record a timeout instead of a generic tool failure.
+                raise
             except ToolError as e:
-                # Use warning instead of error so that if one check fails the rest are still executed
                 logger.warning(f"capa ({flags}) failed to execute: {e}")
-            except json.JSONDecodeError:
+                errors.append(str(e))
+                break
+            except json.JSONDecodeError as e:
                 logger.warning(f"capa ({flags}) output could not be parsed as JSON.")
-            except Exception:
-                logger.exception(f"Unexpected error in capa task '{task_name}'")
+                errors.append(f"invalid JSON output: {e}")
+                break
 
         logger.debug("Parsing capa output")
         parsed_results = self.parse_analyzer_output(raw_results)
@@ -147,8 +157,12 @@ class CapaAnalyzer(BaseAnalyzer):
         # Always write the raw output, even when empty/failed, so the run
         # directory carries the evidence of what capa actually returned.
         parsed_results["raw_output_path"] = self.save_raw(run_dir, "capa_raw_output.json", raw_results)
-        parsed_results["status"] = "ok" if "capa-all" in raw_results else "no_output"
-        if parsed_results["status"] != "ok":
-            parsed_results["reason"] = "capa produced no parseable output for this sample."
+        if errors:
+            parsed_results["status"] = "unavailable"
+            parsed_results["reason"] = "; ".join(errors)
+        else:
+            parsed_results["status"] = "ok" if "capa-all" in raw_results else "no_output"
+            if parsed_results["status"] != "ok":
+                parsed_results["reason"] = "capa produced no parseable output for this sample."
 
         target_file.add_result(self.plugin_id, summary_data=parsed_results)

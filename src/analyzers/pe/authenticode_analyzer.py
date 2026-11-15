@@ -36,22 +36,42 @@ class AuthenticodeAnalyzer(BaseAnalyzer):
             return {"is_valid": "unknown", "reason": f"verification failed: {e}"}
 
     def _sig_timestamp_info(self, sig) -> dict:
-        """Detect signing-time / countersignature attributes defensively."""
-        info: dict = {"has_timestamp": None, "countersigned": None}
+        """Inspect LIEF 1.0 signer attributes for countersignature data.
+
+        ``PKCS9_SIGNING_TIME`` is an authenticated signer attribute, not an
+        RFC 3161 timestamp. RFC 3161 timestamps are carried by the
+        unauthenticated ``MS_COUNTER_SIGN`` attribute; the older PKCS #9
+        countersignature is reported as countersigning only.
+        """
+        info: dict = {"has_timestamp": False, "countersigned": False}
+        complete_scan = True
         try:
-            content_info = getattr(sig, "content_info", None)
-            if content_info is not None:
-                info["has_timestamp"] = bool(getattr(content_info, "signing_time", None))
-        except Exception:
-            pass
-        for attr in ("countersignatures", "ms_counter_signatures"):
+            signers = list(sig.signers)
+        except Exception as e:
+            logger.debug(f"Authenticode attribute enumeration unavailable: {e}")
+            return {"has_timestamp": None, "countersigned": None}
+
+        for signer in signers:
             try:
-                value = getattr(sig, attr, None)
-                if value:
-                    info["countersigned"] = True
-                    break
-            except Exception:
-                pass
+                attributes = signer.unauthenticated_attributes
+                for attribute in attributes:
+                    attribute_type = getattr(attribute, "type", None)
+                    type_name = getattr(attribute_type, "name", None) or str(attribute_type).rsplit(".", 1)[-1]
+                    if type_name == "MS_COUNTER_SIGN":
+                        info["has_timestamp"] = True
+                        info["countersigned"] = True
+                    elif type_name == "PKCS9_COUNTER_SIGNATURE":
+                        info["countersigned"] = True
+            except Exception as e:
+                complete_scan = False
+                logger.debug(f"Authenticode attribute inspection failed: {e}")
+
+        if not complete_scan:
+            # A partial scan must not turn unavailable evidence into a negative.
+            if not info["has_timestamp"]:
+                info["has_timestamp"] = None
+            if not info["countersigned"]:
+                info["countersigned"] = None
         return info
 
     def analyze(self, target_file, tool_path, plugin_config, run_dir):
@@ -62,13 +82,23 @@ class AuthenticodeAnalyzer(BaseAnalyzer):
             if not pe:
                 logger.error(f"LIEF failed to parse {target_file.filename}.")
                 target_file.add_result(
-                    self.plugin_id, summary_data={"is_signed": False, "details": "LIEF could not parse the file as PE."}
+                    self.plugin_id,
+                    summary_data={
+                        "status": "unavailable",
+                        "is_signed": None,
+                        "details": "LIEF could not parse the file as PE.",
+                    },
                 )
                 return
         except Exception as e:
             logger.error(f"LIEF threw an exception while parsing: {e}")
             target_file.add_result(
-                self.plugin_id, summary_data={"is_signed": False, "details": f"LIEF parse error: {e}"}
+                self.plugin_id,
+                summary_data={
+                    "status": "unavailable",
+                    "is_signed": None,
+                    "details": f"LIEF parse error: {e}",
+                },
             )
             return
 

@@ -1,8 +1,9 @@
 # Pinned environment lock for the tested reference environment (Python 3.14).
-# Direct dependencies are declared in pyproject.toml; this file pins the full
-# transitive set for reproducible installs. Optional hash wheels (ppdeep,
-# py-tlsh) can be removed if unavailable on your platform - statcheck degrades
-# gracefully without them.
+# Dependencies are declared in pyproject.toml; this file pins the full runtime
+# set for reproducible installs. After a requirements-only install, either run
+# `python main.py` or install the entry point with `pip install --no-deps -e .`.
+# Optional hash wheels (ppdeep, py-tlsh) can be removed if unavailable on your
+# platform - statcheck degrades gracefully without them.
 aiofiles==25.1.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.2
